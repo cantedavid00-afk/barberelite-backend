@@ -322,7 +322,7 @@ footer strong{color:var(--gold)}
 
   <footer>
     <p>✂ <strong>BarberElite</strong> · Puebla, México · Todos los derechos reservados 2025</p>
-    <p style="margin-top:.5rem">Lunes a Sábado · 10:00 – 20:00 · Domingos: cerrado</p>
+    <p style="margin-top:.5rem">Lunes a Sábado · 08:00 – 18:00 · Domingos: cerrado</p>
   </footer>
 </div>
 
@@ -381,28 +381,25 @@ footer strong{color:var(--gold)}
 
 <script>
 // ══════════════════════════════════════════════════════
-//  CONFIGURACIÓN — CAMBIA ESTOS VALORES
+//  CONFIGURACIÓN
 // ══════════════════════════════════════════════════════
 const ADMIN_PASS = 'barberia2025'; // Cambia por tu contraseña
-
-// TU URL DEL BACKEND (Asegúrate de que termine en /api)
 const API_URL = 'https://barberelite-api.onrender.com/api'; 
 
 // ══════════════════════════════════════════════════════
-//  DATOS DE SERVICIOS
+//  DATOS DE SERVICIOS Y HORARIOS (8:00 AM - 6:00 PM)
 // ══════════════════════════════════════════════════════
 const SERVICES = [
-  {id:1, name:'Corte Clásico',       desc:'Corte con tijeras y máquina, acabado con navaja.',              icon:'✂️', price:150, duration:30},
-  {id:2, name:'Corte + Barba',        desc:'Corte completo más arreglo y diseño de barba.',                 icon:'🪒', price:220, duration:50},
-  {id:3, name:'Afeitado Tradicional', desc:'Afeitado con navaja, toalla caliente y productos premium.',     icon:'🧴', price:120, duration:30},
-  {id:4, name:'Diseño de Barba',      desc:'Perfilado, delineado y definición de barba.',                   icon:'👨', price:100, duration:20},
-  {id:5, name:'Tratamiento Capilar',  desc:'Hidratación profunda y masaje capilar restaurador.',            icon:'💆', price:200, duration:45},
-  {id:6, name:'Corte Junior',         desc:'Corte para niños menores de 12 años, con cuidado y paciencia.',icon:'🧒', price:100, duration:25},
+  {id:1, name:'Corte Clásico',       desc:'Corte con tijeras y máquina, acabado con navaja.',              icon:'✂️', price:150, duration:60},
+  {id:2, name:'Corte + Barba',        desc:'Corte completo más arreglo y diseño de barba.',                 icon:'🪒', price:220, duration:60},
+  {id:3, name:'Afeitado Tradicional', desc:'Afeitado con navaja, toalla caliente y productos premium.',     icon:'🧴', price:120, duration:60},
+  {id:4, name:'Diseño de Barba',      desc:'Perfilado, delineado y definición de barba.',                   icon:'👨', price:100, duration:60},
+  {id:5, name:'Tratamiento Capilar',  desc:'Hidratación profunda y masaje capilar restaurador.',            icon:'💆', price:200, duration:60},
+  {id:6, name:'Corte Junior',         desc:'Corte para niños menores de 12 años, con cuidado y paciencia.',icon:'🧒', price:100, duration:60},
 ];
 
-const WORK_HOURS = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30',
-                    '14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30',
-                    '18:00','18:30','19:00','19:30'];
+// Horarios de 1 hora
+const WORK_HOURS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'];
 
 // ══════════════════════════════════════════════════════
 //  CONEXIÓN GLOBAL CON BASE DE DATOS
@@ -410,12 +407,10 @@ const WORK_HOURS = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:
 let globalApts = [];
 let globalBlocked = [];
 
-// Función principal para traer las citas reales de tu base de datos
 async function loadGlobalData() {
   try {
     const [aptsRes, blockedRes] = await Promise.all([
-      fetch(`${API_URL}/citas`),
-      fetch(`${API_URL}/dias-bloqueados`) // <-- NUEVO ENDPOINT
+      fetch(`${API_URL}/citas`), fetch(`${API_URL}/dias-bloqueados`)
     ]);
 
     if (aptsRes.ok) {
@@ -425,7 +420,7 @@ async function loadGlobalData() {
         return {
           id: cita.id, nombre: cita.nombre, telefono: cita.telefono, email: cita.email, notes: cita.comentarios,
           service: cita.servicio_nombre || (svc ? svc.name : 'Servicio'), serviceId: cita.servicio_id,
-          price: parseFloat(cita.precio) || (svc ? svc.price : 0), duration: svc ? svc.duration : 30,
+          price: parseFloat(cita.precio) || (svc ? svc.price : 0), duration: svc ? svc.duration : 60,
           date: cita.fecha.split('T')[0], time: cita.hora.substring(0,5), status: cita.estado
         };
       });
@@ -433,12 +428,9 @@ async function loadGlobalData() {
 
     if (blockedRes.ok) {
       const bData = await blockedRes.json();
-      // Guardamos la lista global de fechas bloqueadas
       globalBlocked = bData.map(b => b.fecha.split('T')[0]); 
     }
-  } catch (err) {
-    console.error("Error conectando a la BD:", err);
-  }
+  } catch (err) { console.error("Error conectando a la BD:", err); }
 }
 
 function getApts() { return globalApts; }
@@ -457,7 +449,7 @@ function isSlotBlocked(dateStr, slotTime) {
   const slotM = toMins(slotTime);
   return apts.some(a => {
     const s = toMins(a.time);
-    const e = s + (a.duration || 30);
+    const e = s + (a.duration || 60);
     return slotM >= s && slotM < e;
   });
 }
@@ -468,7 +460,7 @@ function hasOverlap(dateStr, slotTime, newDuration, excludeId) {
   const newE = newS + newDuration;
   return apts.some(a => {
     const s = toMins(a.time);
-    const e = s + (a.duration || 30);
+    const e = s + (a.duration || 60);
     return newS < e && newE > s;
   });
 }
@@ -553,7 +545,7 @@ function renderSlots() {
   const days=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const months=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   document.getElementById('slotsTitle').textContent = `${days[d.getDay()]} ${d.getDate()} de ${months[d.getMonth()]}`;
-  const dur = state.selectedService?.duration || 30;
+  const dur = state.selectedService?.duration || 60;
   let html = '';
   for (const h of WORK_HOURS) {
     const blocked = isSlotBlocked(state.selectedDate, h);
@@ -749,9 +741,9 @@ function renderWeekView(c) {
     const isT = d.toDateString()===today.toDateString();
     header += `<div class="week-cell-header ${isT?'today':''}"><div class="wd">${days[i]}</div><div class="dd">${d.getDate()}</div></div>`;
   });
-  const showH = WORK_HOURS.filter((_,i)=>i%2===0);
+  
   let body = '';
-  for (const h of showH) {
+  for (const h of WORK_HOURS) {
     body += `<div class="week-time">${h}</div>`;
     weekDates.forEach(d => {
       const ds = d.toISOString().split('T')[0];
@@ -780,16 +772,19 @@ function filterApts(status) {
 }
 
 // ══════════════════════════════════════════════════════
-//  GESTOR DE DISPONIBILIDAD (RESTAURO EL MÓDULO)
+//  GESTOR DE DISPONIBILIDAD (MEJORADO)
 // ══════════════════════════════════════════════════════
 function renderAvailability(c) {
   const blocked = getBlocked();
+  const hoursOptions = WORK_HOURS.map(h => `<option value="${h}">${h}</option>`).join('');
+
   c.innerHTML = `
   <div style="margin-bottom:1.5rem"><div class="section-tag">Control</div><h2 style="font-size:1.5rem">Gestión de Disponibilidad</h2></div>
   <div class="avail-grid">
+    
     <div class="avail-card">
       <h4>Días Completos Bloqueados</h4>
-      <p>Selecciona un día en el calendario para cerrarlo. Los clientes verán todo el día en gris y no podrán agendar.</p>
+      <p>Cierra un día entero. No podrás bloquear días que ya tengan citas agendadas.</p>
       <div class="blocked-days" id="blockedList">
         ${blocked.map(d=>`<div class="blocked-day-tag" onclick="removeBlock('${d}')">${formatDate(d)} ✕</div>`).join('')||'<span style="color:var(--muted);font-size:.82rem">Sin días bloqueados</span>'}
       </div>
@@ -798,26 +793,41 @@ function renderAvailability(c) {
         <button class="btn-sm btn-sm-red" onclick="addBlock()">+ Bloquear Día</button>
       </div>
     </div>
+
     <div class="avail-card">
-      <h4>Bloquear un Horario Específico</h4>
-      <p>💡 <b>Pro-Tip:</b> Si solo necesitas salir 1 hora al banco el jueves, no bloquees todo el día.</p>
-      <p style="color:var(--cream); background:var(--bg3); padding:1rem; border-radius:8px; font-size:.85rem;">
-        La forma más rápida y profesional de bloquear solo una hora (ej. 3:00 PM) es ir a tu misma página web y <b>agendarte tú mismo una cita</b> a esa hora. Ponle de nombre <b>"Bloqueado"</b> o "Comida". Así ese espacio se bloquea en el sistema para todos los clientes y tu sigues teniendo control total.
-      </p>
+      <h4>Bloquear Hora Específica</h4>
+      <p>Cierra una hora en particular (ej. salir a comer). Se guardará como una reservación bloqueada.</p>
+      <div class="add-block-row" style="margin-top:1rem; flex-direction:column; align-items:flex-start; gap:0.8rem;">
+        <input type="date" id="blockHourDate" style="width:100%"/>
+        <select id="blockHourTime" style="width:100%; background:var(--bg3); border:1px solid var(--border); color:var(--cream); padding:0.5rem; border-radius:5px;">
+          <option value="">Selecciona la hora...</option>
+          ${hoursOptions}
+        </select>
+        <button class="btn-sm btn-sm-gold" onclick="blockSpecificHour()" style="width:100%">🔒 Bloquear Hora</button>
+      </div>
     </div>
+
   </div>`;
 }
 
+// Bloquear el día (Validando si hay citas)
 async function addBlock() {
   const d = document.getElementById('blockDateInput').value;
   if (!d) return alert('Selecciona una fecha');
+  
+  // VERIFICAR SI HAY CITAS ESE DÍA
+  const citasEseDia = getApts().filter(a => a.date === d && a.status !== 'cancelada');
+  if (citasEseDia.length > 0) {
+    return alert(`❌ ALERTA: No puedes bloquear el ${formatDate(d)} porque ya tienes ${citasEseDia.length} reservación(es) activa(s). Cancela o reasigna esas citas primero.`);
+  }
+
   try {
     await fetch(`${API_URL}/bloquear-dia`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ fecha: d, motivo: 'Bloqueado desde admin' })
     });
     await loadGlobalData();
     renderAvailability(document.getElementById('adminContent'));
-    renderCalendar(); // Actualiza el calendario del cliente también
+    renderCalendar(); 
   } catch(e) { alert('Error bloqueando día'); }
 }
 
@@ -826,8 +836,42 @@ async function removeBlock(d) {
     await fetch(`${API_URL}/bloquear-dia/${d}`, { method: 'DELETE' });
     await loadGlobalData();
     renderAvailability(document.getElementById('adminContent'));
-    renderCalendar(); // Actualiza el calendario del cliente también
+    renderCalendar(); 
   } catch(e) { alert('Error desbloqueando día'); }
+}
+
+// Bloquear Hora en Específico
+async function blockSpecificHour() {
+  const d = document.getElementById('blockHourDate').value;
+  const h = document.getElementById('blockHourTime').value;
+
+  if (!d || !h) return alert('Selecciona una fecha y una hora.');
+
+  // Verificar si la hora ya está tomada
+  const isTaken = getApts().some(a => a.date === d && a.time === h && a.status !== 'cancelada');
+  if (isTaken) return alert('Ese horario ya está ocupado por una reservación u otro bloqueo.');
+
+  const payload = {
+    nombre: 'BLOQUEADO (Admin)',
+    telefono: '0000000000',
+    email: 'admin@barberelite.com',
+    servicio_id: 1, 
+    fecha: d,
+    hora: h,
+    comentarios: 'Bloqueado manualmente desde el panel de disponibilidad'
+  };
+
+  try {
+    const response = await fetch(`${API_URL}/citas`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if (response.ok) {
+      alert('✅ Hora bloqueada con éxito.');
+      await loadGlobalData();
+      renderAvailability(document.getElementById('adminContent'));
+      renderCalendar();
+    } else alert('Error al bloquear la hora.');
+  } catch (err) { alert('Error de conexión.'); }
 }
 
 function formatDate(ds) {
@@ -854,7 +898,7 @@ function renderConfig(c) {
   <div style="margin-bottom:1.5rem"><div class="section-tag">Ajustes</div><h2 style="font-size:1.5rem">Configuración</h2></div>
   <div class="config-section">
     <h4>✅ Notificaciones Telegram Activas</h4>
-    <p>Las notificaciones ahora se gestionan de forma segura desde el servidor en la nube de Render mediante la Base de Datos de Supabase. Ya no es necesario ingresar el Token en cada dispositivo.</p>
+    <p>Las notificaciones ahora se gestionan de forma segura desde el servidor en la nube de Render mediante la Base de Datos de Supabase.</p>
   </div>`;
 }
 
