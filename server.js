@@ -283,7 +283,7 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 // Ruta raíz — página de bienvenida
-app.get('/private/index.html', (req, res) => {
+app.get('index.html', (req, res) => {
   res.send(`
     <html><body style="font-family:sans-serif;text-align:center;padding:4rem;background:#0D0B08;color:#C5A028">
       <h1>✂️ BarberElite API</h1>
