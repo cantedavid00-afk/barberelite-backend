@@ -202,15 +202,6 @@ textarea{resize:vertical;min-height:90px}
 .btn-sm-gold:hover{background:rgba(197,160,40,.4)}
 .btn-sm-red{background:rgba(139,32,32,.2);color:#e07070;border:1px solid rgba(180,50,50,.35)}
 .btn-sm-red:hover{background:rgba(139,32,32,.4)}
-.hour-row{display:flex;align-items:center;gap:.8rem;padding:.45rem 0;border-bottom:1px solid rgba(42,36,32,.5)}
-.hour-row:last-child{border-bottom:none}
-.hour-label{width:65px;font-size:.82rem;color:var(--muted)}
-.toggle-switch{position:relative;width:40px;height:21px;flex-shrink:0}
-.toggle-switch input{opacity:0;width:0;height:0}
-.toggle-slider{position:absolute;inset:0;background:var(--bg3);border:1px solid var(--border);border-radius:11px;cursor:pointer;transition:.2s}
-.toggle-slider::before{content:'';position:absolute;width:15px;height:15px;border-radius:50%;background:var(--muted);left:2px;top:2px;transition:.2s}
-input:checked+.toggle-slider{background:rgba(197,160,40,.2);border-color:var(--gold)}
-input:checked+.toggle-slider::before{background:var(--gold);transform:translateX(19px)}
 
 /* CRM */
 .crm-list{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
@@ -228,14 +219,6 @@ input:checked+.toggle-slider::before{background:var(--gold);transform:translateX
 .config-section{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;margin-bottom:1rem}
 .config-section h4{font-family:var(--font-head);font-size:1.05rem;margin-bottom:.4rem}
 .config-section p{font-size:.82rem;color:var(--muted);margin-bottom:1rem}
-.config-row{display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:end;margin-bottom:.8rem}
-.config-row label{display:block;font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:.4rem}
-.tg-test-result{font-size:.82rem;margin-top:.5rem;padding:.5rem .8rem;border-radius:6px;display:none}
-.tg-test-ok{background:rgba(30,90,30,.2);color:#6dbe6d;border:1px solid rgba(40,120,40,.3)}
-.tg-test-fail{background:rgba(139,32,32,.2);color:#e07070;border:1px solid rgba(180,50,50,.3)}
-.reset-zone{background:rgba(139,32,32,.1);border:1px solid rgba(139,32,32,.3);border-radius:var(--radius);padding:1.5rem;margin-bottom:1rem}
-.reset-zone h4{font-family:var(--font-head);font-size:1.05rem;margin-bottom:.4rem;color:#e07070}
-.reset-zone p{font-size:.82rem;color:var(--muted);margin-bottom:1rem}
 
 /* MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;display:none;place-items:center;backdrop-filter:blur(8px)}
@@ -254,7 +237,6 @@ footer strong{color:var(--gold)}
 </head>
 <body>
 
-<!-- ══ NAV ══ -->
 <nav>
   <div class="logo" onclick="goTo('inicio')">✂ Barber<span>Elite</span></div>
   <ul>
@@ -267,11 +249,9 @@ footer strong{color:var(--gold)}
   </div>
 </nav>
 
-<!-- ══ CLIENT PORTAL ══ -->
 <div class="client-portal" id="clientPortal">
 
-  <!-- HERO -->
-  <div id="inicio" style="min-height:100vh;display:grid;place-items:center;text-align:center;position:relative;overflow:hidden;padding-top:80px" class="hero">
+  <div id="inicio" class="hero">
     <div class="hero-bg"></div>
     <div class="hero-stripes"><div class="stripe"></div><div class="stripe"></div><div class="stripe"></div></div>
     <div class="hero-content">
@@ -290,7 +270,6 @@ footer strong{color:var(--gold)}
     </div>
   </div>
 
-  <!-- SERVICES -->
   <section class="page-section" id="servicios">
     <div class="section-tag">Lo que ofrecemos</div>
     <h2>Nuestros Servicios</h2>
@@ -298,7 +277,6 @@ footer strong{color:var(--gold)}
     <div class="services-grid" id="servicesGrid"></div>
   </section>
 
-  <!-- BOOKING -->
   <section class="page-section" id="agendar">
     <div class="section-tag">Tu próxima cita</div>
     <h2>Agendar Cita</h2>
@@ -348,7 +326,6 @@ footer strong{color:var(--gold)}
   </footer>
 </div>
 
-<!-- ══ ADMIN PANEL ══ -->
 <div class="admin-panel" id="adminPanel">
   <div class="admin-header">
     <h2>Panel de Administración</h2>
@@ -379,7 +356,6 @@ footer strong{color:var(--gold)}
   </div>
 </div>
 
-<!-- ══ ADMIN LOGIN MODAL ══ -->
 <div class="modal-overlay" id="adminModal">
   <div class="modal-box">
     <h3>Acceso Admin</h3>
@@ -394,7 +370,6 @@ footer strong{color:var(--gold)}
   </div>
 </div>
 
-<!-- ══ SUCCESS OVERLAY ══ -->
 <div class="success-overlay" id="successOverlay">
   <div class="success-box">
     <div class="success-icon">✅</div>
@@ -409,7 +384,6 @@ footer strong{color:var(--gold)}
 //  CONFIGURACIÓN — CAMBIA ESTOS VALORES
 // ══════════════════════════════════════════════════════
 const ADMIN_PASS = 'barberia2025'; // Cambia por tu contraseña
-const RESET_PASS = 'resetTotal2025'; // Contraseña para el reset total
 
 // TU URL DEL BACKEND (Asegúrate de que termine en /api)
 const API_URL = 'https://barberelite-api.onrender.com/api'; 
@@ -439,41 +413,38 @@ let globalBlocked = [];
 // Función principal para traer las citas reales de tu base de datos
 async function loadGlobalData() {
   try {
-    const response = await fetch(`${API_URL}/citas`);
-    if (response.ok) {
-      const dbData = await response.json();
-      // Traducimos los datos de la BD al formato del Frontend
+    const [aptsRes, blockedRes] = await Promise.all([
+      fetch(`${API_URL}/citas`),
+      fetch(`${API_URL}/dias-bloqueados`) // <-- NUEVO ENDPOINT
+    ]);
+
+    if (aptsRes.ok) {
+      const dbData = await aptsRes.json();
       globalApts = dbData.map(cita => {
-        // Buscar la duración del servicio
         const svc = SERVICES.find(s => s.id === cita.servicio_id);
         return {
-          id: cita.id,
-          nombre: cita.nombre,
-          telefono: cita.telefono,
-          email: cita.email,
-          notes: cita.comentarios,
-          service: cita.servicio_nombre || (svc ? svc.name : 'Servicio'),
-          serviceId: cita.servicio_id,
-          price: parseFloat(cita.precio) || (svc ? svc.price : 0),
-          duration: svc ? svc.duration : 30,
-          date: cita.fecha.split('T')[0], // Convertir formato de Supabase
-          time: cita.hora.substring(0,5), // Dejar solo HH:MM
-          status: cita.estado
+          id: cita.id, nombre: cita.nombre, telefono: cita.telefono, email: cita.email, notes: cita.comentarios,
+          service: cita.servicio_nombre || (svc ? svc.name : 'Servicio'), serviceId: cita.servicio_id,
+          price: parseFloat(cita.precio) || (svc ? svc.price : 0), duration: svc ? svc.duration : 30,
+          date: cita.fecha.split('T')[0], time: cita.hora.substring(0,5), status: cita.estado
         };
       });
+    }
+
+    if (blockedRes.ok) {
+      const bData = await blockedRes.json();
+      // Guardamos la lista global de fechas bloqueadas
+      globalBlocked = bData.map(b => b.fecha.split('T')[0]); 
     }
   } catch (err) {
     console.error("Error conectando a la BD:", err);
   }
 }
 
-// "Trampa" limpia: Hacemos que getApts() devuelva la variable global. 
-// Así no tenemos que reescribir todo el código del calendario.
 function getApts() { return globalApts; }
 function getBlocked() { return globalBlocked; } 
 
-// Cargar datos al entrar a la página
-loadGlobalData();
+loadGlobalData().then(() => renderCalendar());
 
 // ══════════════════════════════════════════════════════
 //  UTILIDADES DE TIEMPO
@@ -614,7 +585,7 @@ function updateSummary() {
 }
 
 // ══════════════════════════════════════════════════════
-//  SUBMIT BOOKING (AHORA CONECTADO A RENDER/SUPABASE)
+//  SUBMIT BOOKING
 // ══════════════════════════════════════════════════════
 async function submitBooking() {
   hideError();
@@ -627,22 +598,14 @@ async function submitBooking() {
     showError('Por favor completa todos los campos obligatorios y selecciona fecha/hora.'); return;
   }
 
-  // Empaquetar datos para el servidor
   const payload = {
-    nombre: name,
-    telefono: phone,
-    email: email,
-    servicio_id: state.selectedService.id,
-    fecha: state.selectedDate,
-    hora: state.selectedSlot,
-    comentarios: notes
+    nombre: name, telefono: phone, email: email, servicio_id: state.selectedService.id,
+    fecha: state.selectedDate, hora: state.selectedSlot, comentarios: notes
   };
 
   try {
     const response = await fetch(`${API_URL}/citas`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -651,22 +614,18 @@ async function submitBooking() {
       return;
     }
 
-    // Cita guardada. Volver a cargar las citas globales para que se actualice la pantalla.
     await loadGlobalData(); 
     
-    // Mostrar mensaje de éxito
     const d = new Date(state.selectedDate+'T12:00:00');
     document.getElementById('successMsg').textContent =
       `${name}, tu cita de "${state.selectedService.name}" fue agendada para el ${d.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'})} a las ${state.selectedSlot}.`;
     document.getElementById('successOverlay').classList.add('show');
 
-    // Limpiar formulario
     state.selectedService = null; state.selectedDate = null; state.selectedSlot = null;
     ['fName','fPhone','fEmail','fNotes'].forEach(id => document.getElementById(id).value='');
     renderServices(); renderCalendar();
     document.getElementById('slotsCard').style.display='none';
     updateSummary();
-
   } catch (err) {
     showError('Error de conexión con el servidor. Verifica tu internet.');
   }
@@ -706,7 +665,6 @@ function showAdminSection(sec, el) {
   else if (sec==='config')  renderConfig(c);
 }
 
-// Cargamos de nuevo de BD al abrir el panel para tener lo más fresco
 async function initAdmin() {
   await loadGlobalData(); 
   const today = new Date();
@@ -717,7 +675,7 @@ async function initAdmin() {
 }
 
 // ══════════════════════════════════════════════════════
-//  ADMIN RENDERERS (DASHBOARD, AGENDA, ETC)
+//  ADMIN RENDERERS
 // ══════════════════════════════════════════════════════
 function renderDashboard(c) {
   const today   = new Date().toISOString().split('T')[0];
@@ -762,21 +720,13 @@ function renderAptsTable(apts, showActions=false) {
   return `<div class="apts-table"><div class="apts-table-header"><span>Hora</span><span>Cliente</span><span>Servicio</span><span>Estado</span><span>Acciones</span></div>${rows}</div>`;
 }
 
-// ══════════════════════════════════════════════════════
-//  CAMBIO DE ESTADO DE CITA (BASE DE DATOS)
-// ══════════════════════════════════════════════════════
 async function changeAptStatus(id, newStatus) {
   try {
     const res = await fetch(`${API_URL}/citas/${id}/estado`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ estado: newStatus })
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado: newStatus })
     });
-    
     if(res.ok) {
-      await loadGlobalData(); // Refrescar los datos globales
-      
-      // Recargar la vista en la que estemos
+      await loadGlobalData();
       const c = document.getElementById('adminContent');
       const activeLink = document.querySelector('.sidebar-link.active');
       if (activeLink) {
@@ -784,15 +734,10 @@ async function changeAptStatus(id, newStatus) {
         if (sec.includes('Dashboard')) renderDashboard(c);
         else if (sec.includes('Citas')) renderAllApts(c);
       }
-    } else {
-      alert("No se pudo cambiar el estado en la BD.");
-    }
-  } catch (err) {
-    alert("Error de red cambiando el estado.");
-  }
+    } else alert("No se pudo cambiar el estado en la BD.");
+  } catch (err) { alert("Error de red cambiando el estado."); }
 }
 
-// (El resto de las funciones de renderizado de la UI se mantienen igual...)
 function renderWeekView(c) {
   const today   = new Date();
   const monday  = new Date(today); monday.setDate(today.getDate()-((today.getDay()+6)%7));
@@ -834,10 +779,60 @@ function filterApts(status) {
   document.getElementById('aptsTableContainer').innerHTML = renderAptsTable(filtered, true);
 }
 
+// ══════════════════════════════════════════════════════
+//  GESTOR DE DISPONIBILIDAD (RESTAURO EL MÓDULO)
+// ══════════════════════════════════════════════════════
 function renderAvailability(c) {
+  const blocked = getBlocked();
   c.innerHTML = `
-  <div style="margin-bottom:1.5rem"><div class="section-tag">Control</div><h2 style="font-size:1.5rem">Disponibilidad</h2></div>
-  <div class="avail-card"><p>Nota: La gestión de horarios fijos y días bloqueados se administra en la base de datos.</p></div>`;
+  <div style="margin-bottom:1.5rem"><div class="section-tag">Control</div><h2 style="font-size:1.5rem">Gestión de Disponibilidad</h2></div>
+  <div class="avail-grid">
+    <div class="avail-card">
+      <h4>Días Completos Bloqueados</h4>
+      <p>Selecciona un día en el calendario para cerrarlo. Los clientes verán todo el día en gris y no podrán agendar.</p>
+      <div class="blocked-days" id="blockedList">
+        ${blocked.map(d=>`<div class="blocked-day-tag" onclick="removeBlock('${d}')">${formatDate(d)} ✕</div>`).join('')||'<span style="color:var(--muted);font-size:.82rem">Sin días bloqueados</span>'}
+      </div>
+      <div class="add-block-row" style="margin-top:1rem">
+        <input type="date" id="blockDateInput" style="width:auto"/>
+        <button class="btn-sm btn-sm-red" onclick="addBlock()">+ Bloquear Día</button>
+      </div>
+    </div>
+    <div class="avail-card">
+      <h4>Bloquear un Horario Específico</h4>
+      <p>💡 <b>Pro-Tip:</b> Si solo necesitas salir 1 hora al banco el jueves, no bloquees todo el día.</p>
+      <p style="color:var(--cream); background:var(--bg3); padding:1rem; border-radius:8px; font-size:.85rem;">
+        La forma más rápida y profesional de bloquear solo una hora (ej. 3:00 PM) es ir a tu misma página web y <b>agendarte tú mismo una cita</b> a esa hora. Ponle de nombre <b>"Bloqueado"</b> o "Comida". Así ese espacio se bloquea en el sistema para todos los clientes y tu sigues teniendo control total.
+      </p>
+    </div>
+  </div>`;
+}
+
+async function addBlock() {
+  const d = document.getElementById('blockDateInput').value;
+  if (!d) return alert('Selecciona una fecha');
+  try {
+    await fetch(`${API_URL}/bloquear-dia`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ fecha: d, motivo: 'Bloqueado desde admin' })
+    });
+    await loadGlobalData();
+    renderAvailability(document.getElementById('adminContent'));
+    renderCalendar(); // Actualiza el calendario del cliente también
+  } catch(e) { alert('Error bloqueando día'); }
+}
+
+async function removeBlock(d) {
+  try {
+    await fetch(`${API_URL}/bloquear-dia/${d}`, { method: 'DELETE' });
+    await loadGlobalData();
+    renderAvailability(document.getElementById('adminContent'));
+    renderCalendar(); // Actualiza el calendario del cliente también
+  } catch(e) { alert('Error desbloqueando día'); }
+}
+
+function formatDate(ds) {
+  const d = new Date(ds+'T12:00:00');
+  return d.toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'});
 }
 
 function renderCRM(c) {
@@ -866,7 +861,6 @@ function renderConfig(c) {
 function goTo(id) { const el = document.getElementById(id); if (el) { el.scrollIntoView({behavior:'smooth', block:'start'}); } }
 
 renderServices();
-renderCalendar();
 </script>
 </body>
 </html>
