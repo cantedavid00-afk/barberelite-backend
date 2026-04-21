@@ -282,7 +282,16 @@ cron.schedule('*/5 * * * *', async () => {
     console.error('Error cron recordatorio:', err.message);
   }
 });
-
+// Ruta raíz — página de bienvenida
+app.get('/', (req, res) => {
+  res.send(`
+    <html><body style="font-family:sans-serif;text-align:center;padding:4rem;background:#0D0B08;color:#C5A028">
+      <h1>✂️ BarberElite API</h1>
+      <p style="color:#9A8F7E">Backend funcionando correctamente</p>
+      <a href="/health" style="color:#C5A028">/health</a>
+    </body></html>
+  `);
+});
 // ════════════════════════════════════════
 //  HEALTH CHECK & START
 // ════════════════════════════════════════
