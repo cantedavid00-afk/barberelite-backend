@@ -10,6 +10,7 @@ const cors       = require('cors');
 const { Pool }   = require('pg');
 const cron       = require('node-cron');
 const axios      = require('axios');
+const path       = require('path');
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
@@ -282,16 +283,20 @@ cron.schedule('*/5 * * * *', async () => {
     console.error('Error cron recordatorio:', err.message);
   }
 });
-// Ruta raíz — página de bienvenida
-app.get('index.html', (req, res) => {
-  res.send(`
-    <html><body style="font-family:sans-serif;text-align:center;padding:4rem;background:#0D0B08;color:#C5A028">
-      <h1>✂️ BarberElite API</h1>
-      <p style="color:#9A8F7E">Backend funcionando correctamente</p>
-      <a href="/health" style="color:#C5A028">/health</a>
-    </body></html>
-  `);
+// ════════════════════════════════════════
+//  CONFIGURACIÓN DEL FRONTEND
+// ════════════════════════════════════════
+// 1. Le decimos a Express que la carpeta "public" contiene los archivos web
+app.use(express.static(path.join(__dirname, 'public')));
+
+// 2. Cualquier ruta que no sea de la API, mostrará tu index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+// ════════════════════════════════════════
+//  HEALTH CHECK & START
+// ════════════════════════════════════════
 // ════════════════════════════════════════
 //  HEALTH CHECK & START
 // ════════════════════════════════════════
