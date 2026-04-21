@@ -219,6 +219,11 @@ textarea{resize:vertical;min-height:90px}
 .config-section{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;margin-bottom:1rem}
 .config-section h4{font-family:var(--font-head);font-size:1.05rem;margin-bottom:.4rem}
 .config-section p{font-size:.82rem;color:var(--muted);margin-bottom:1rem}
+.config-row{display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:end;margin-bottom:.8rem}
+.config-row label{display:block;font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:.4rem}
+.tg-test-result{font-size:.82rem;margin-top:.5rem;padding:.5rem .8rem;border-radius:6px;display:none}
+.tg-test-ok{background:rgba(30,90,30,.2);color:#6dbe6d;border:1px solid rgba(40,120,40,.3)}
+.tg-test-fail{background:rgba(139,32,32,.2);color:#e07070;border:1px solid rgba(180,50,50,.3)}
 
 /* MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;display:none;place-items:center;backdrop-filter:blur(8px)}
@@ -385,6 +390,8 @@ footer strong{color:var(--gold)}
 // ══════════════════════════════════════════════════════
 const ADMIN_PASS = 'barberia2025'; // Cambia por tu contraseña
 const API_URL = 'https://barberelite-api.onrender.com/api'; 
+const LS_TG_TOKEN = 'be_tg_token';
+const LS_TG_CHAT  = 'be_tg_chat';
 
 // ══════════════════════════════════════════════════════
 //  DATOS DE SERVICIOS Y HORARIOS (8:00 AM - 6:00 PM)
@@ -398,7 +405,6 @@ const SERVICES = [
   {id:6, name:'Corte Junior',         desc:'Corte para niños menores de 12 años, con cuidado y paciencia.',icon:'🧒', price:100, duration:60},
 ];
 
-// Horarios de 1 hora
 const WORK_HOURS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'];
 
 // ══════════════════════════════════════════════════════
@@ -437,6 +443,23 @@ function getApts() { return globalApts; }
 function getBlocked() { return globalBlocked; } 
 
 loadGlobalData().then(() => renderCalendar());
+
+// ══════════════════════════════════════════════════════
+//  TELEGRAM (Desde Frontend)
+// ══════════════════════════════════════════════════════
+async function sendTelegram(msg) {
+  const token  = localStorage.getItem(LS_TG_TOKEN) || '';
+  const chatId = localStorage.getItem(LS_TG_CHAT) || '';
+  if (!token || !chatId) return false;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode:'HTML' })
+    });
+    const d = await r.json();
+    return d.ok;
+  } catch(e) { return false; }
+}
 
 // ══════════════════════════════════════════════════════
 //  UTILIDADES DE TIEMPO
@@ -608,6 +631,18 @@ async function submitBooking() {
 
     await loadGlobalData(); 
     
+    // Mandar mensaje de Telegram desde aquí
+    const fechaLeg = new Date(state.selectedDate+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
+    await sendTelegram(
+      `✂️ <b>¡Nueva Cita Agendada!</b>\n\n`+
+      `👤 <b>Cliente:</b> ${name}\n`+
+      `📱 <b>Tel:</b> ${phone}\n`+
+      `💈 <b>Servicio:</b> ${state.selectedService.name} ($${state.selectedService.price} MXN)\n`+
+      `📅 <b>Fecha:</b> ${fechaLeg}\n`+
+      `🕐 <b>Hora:</b> ${state.selectedSlot}\n`+
+      (notes ? `📝 <b>Nota:</b> ${notes}` : '📝 Sin comentarios adicionales')
+    );
+
     const d = new Date(state.selectedDate+'T12:00:00');
     document.getElementById('successMsg').textContent =
       `${name}, tu cita de "${state.selectedService.name}" fue agendada para el ${d.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'})} a las ${state.selectedSlot}.`;
@@ -772,7 +807,7 @@ function filterApts(status) {
 }
 
 // ══════════════════════════════════════════════════════
-//  GESTOR DE DISPONIBILIDAD (MEJORADO)
+//  GESTOR DE DISPONIBILIDAD (DÍAS Y HORAS)
 // ══════════════════════════════════════════════════════
 function renderAvailability(c) {
   const blocked = getBlocked();
@@ -810,12 +845,11 @@ function renderAvailability(c) {
   </div>`;
 }
 
-// Bloquear el día (Validando si hay citas)
 async function addBlock() {
   const d = document.getElementById('blockDateInput').value;
   if (!d) return alert('Selecciona una fecha');
   
-  // VERIFICAR SI HAY CITAS ESE DÍA
+  // Validar citas activas
   const citasEseDia = getApts().filter(a => a.date === d && a.status !== 'cancelada');
   if (citasEseDia.length > 0) {
     return alert(`❌ ALERTA: No puedes bloquear el ${formatDate(d)} porque ya tienes ${citasEseDia.length} reservación(es) activa(s). Cancela o reasigna esas citas primero.`);
@@ -840,25 +874,18 @@ async function removeBlock(d) {
   } catch(e) { alert('Error desbloqueando día'); }
 }
 
-// Bloquear Hora en Específico
 async function blockSpecificHour() {
   const d = document.getElementById('blockHourDate').value;
   const h = document.getElementById('blockHourTime').value;
 
   if (!d || !h) return alert('Selecciona una fecha y una hora.');
 
-  // Verificar si la hora ya está tomada
   const isTaken = getApts().some(a => a.date === d && a.time === h && a.status !== 'cancelada');
-  if (isTaken) return alert('Ese horario ya está ocupado por una reservación u otro bloqueo.');
+  if (isTaken) return alert('Ese horario ya está ocupado.');
 
   const payload = {
-    nombre: 'BLOQUEADO (Admin)',
-    telefono: '0000000000',
-    email: 'admin@barberelite.com',
-    servicio_id: 1, 
-    fecha: d,
-    hora: h,
-    comentarios: 'Bloqueado manualmente desde el panel de disponibilidad'
+    nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@barberelite.com',
+    servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueado manualmente'
   };
 
   try {
@@ -893,13 +920,57 @@ function renderCRM(c) {
   ${clients.map(cl=>`<div class="crm-row"><div class="crm-name">${cl.nombre}</div><div>${cl.tel}</div><div class="crm-visits">${cl.visits}</div><div class="crm-spent">$${cl.spent}</div></div>`).join('')}</div>`;
 }
 
+// ══════════════════════════════════════════════════════
+//  CONFIGURACIÓN DE TELEGRAM RESTAURADA
+// ══════════════════════════════════════════════════════
 function renderConfig(c) {
+  const token  = localStorage.getItem(LS_TG_TOKEN) || '';
+  const chatId = localStorage.getItem(LS_TG_CHAT) || '';
+  
   c.innerHTML = `
-  <div style="margin-bottom:1.5rem"><div class="section-tag">Ajustes</div><h2 style="font-size:1.5rem">Configuración</h2></div>
+  <div style="margin-bottom:1.5rem"><div class="section-tag">Ajustes</div><h2 style="font-size:1.5rem">Configuración de Alertas</h2></div>
   <div class="config-section">
-    <h4>✅ Notificaciones Telegram Activas</h4>
-    <p>Las notificaciones ahora se gestionan de forma segura desde el servidor en la nube de Render mediante la Base de Datos de Supabase.</p>
+    <h4>Notificaciones Telegram</h4>
+    <p>Ingresa tu Bot Token y tu Chat ID para recibir un mensaje en tu celular cada vez que alguien agende.</p>
+    
+    <div class="form-group">
+      <label>Token del Bot (@BotFather)</label>
+      <input type="text" id="cfgToken" value="${token}" placeholder="123456789:ABCdef..."/>
+    </div>
+    
+    <div class="form-group">
+      <label>Tu Chat ID (@userinfobot)</label>
+      <input type="text" id="cfgChatId" value="${chatId}" placeholder="987654321"/>
+    </div>
+    
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <button class="btn-sm btn-sm-gold" onclick="saveConfig()">Guardar Configuración</button>
+      <button class="btn-sm btn-sm-gold" onclick="testTelegram()">Enviar Mensaje de Prueba</button>
+    </div>
+    
+    <div class="tg-test-result" id="tgTestResult" style="margin-top: 1rem;"></div>
   </div>`;
+}
+
+function saveConfig() {
+  const t = document.getElementById('cfgToken').value.trim();
+  const c = document.getElementById('cfgChatId').value.trim();
+  localStorage.setItem(LS_TG_TOKEN, t);
+  localStorage.setItem(LS_TG_CHAT, c);
+  showTgResult('✅ Configuración guardada en este navegador.', true);
+}
+
+async function testTelegram() {
+  saveConfig();
+  const ok = await sendTelegram('✂️ <b>BarberElite</b> — Prueba de conexión.\n\n¡Tu sistema de reservas está conectado a Telegram correctamente!');
+  showTgResult(ok ? '✅ Mensaje enviado con éxito. Revisa tu celular.' : '❌ Error. Verifica que iniciaste el chat con tu bot (/start) y que los datos son correctos.', ok);
+}
+
+function showTgResult(msg, ok) {
+  const el = document.getElementById('tgTestResult');
+  el.textContent = msg;
+  el.className = 'tg-test-result ' + (ok ? 'tg-test-ok' : 'tg-test-fail');
+  el.style.display = 'block';
 }
 
 function goTo(id) { const el = document.getElementById(id); if (el) { el.scrollIntoView({behavior:'smooth', block:'start'}); } }
