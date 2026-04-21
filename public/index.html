@@ -411,8 +411,11 @@ footer strong{color:var(--gold)}
 const ADMIN_PASS = 'barberia2025'; // Cambia por tu contraseña
 const RESET_PASS = 'resetTotal2025'; // Contraseña para el reset total
 
+// TU URL DEL BACKEND (Asegúrate de que termine en /api)
+const API_URL = 'https://barberelite-api.onrender.com/api'; 
+
 // ══════════════════════════════════════════════════════
-//  DATOS DE SERVICIOS (personalizables)
+//  DATOS DE SERVICIOS
 // ══════════════════════════════════════════════════════
 const SERVICES = [
   {id:1, name:'Corte Clásico',       desc:'Corte con tijeras y máquina, acabado con navaja.',              icon:'✂️', price:150, duration:30},
@@ -428,41 +431,49 @@ const WORK_HOURS = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:
                     '18:00','18:30','19:00','19:30'];
 
 // ══════════════════════════════════════════════════════
-//  PERSISTENCIA — localStorage
+//  CONEXIÓN GLOBAL CON BASE DE DATOS
 // ══════════════════════════════════════════════════════
-const LS = {
-  apts:     'be_appointments',
-  blocked:  'be_blocked_dates',
-  tgToken:  'be_tg_token',
-  tgChatId: 'be_tg_chat_id',
-};
+let globalApts = [];
+let globalBlocked = [];
 
-function getApts() {
-  try { return JSON.parse(localStorage.getItem(LS.apts)) || []; } catch(e) { return []; }
-}
-function saveApts(a) { localStorage.setItem(LS.apts, JSON.stringify(a)); }
-
-function getBlocked() {
-  try { return JSON.parse(localStorage.getItem(LS.blocked)) || []; } catch(e) { return []; }
-}
-function saveBlocked(b) { localStorage.setItem(LS.blocked, JSON.stringify(b)); }
-
-// ══════════════════════════════════════════════════════
-//  TELEGRAM
-// ══════════════════════════════════════════════════════
-async function sendTelegram(msg) {
-  const token  = localStorage.getItem(LS.tgToken)  || '';
-  const chatId = localStorage.getItem(LS.tgChatId) || '';
-  if (!token || !chatId) return false;
+// Función principal para traer las citas reales de tu base de datos
+async function loadGlobalData() {
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode:'HTML' })
-    });
-    const d = await r.json();
-    return d.ok;
-  } catch(e) { return false; }
+    const response = await fetch(`${API_URL}/citas`);
+    if (response.ok) {
+      const dbData = await response.json();
+      // Traducimos los datos de la BD al formato del Frontend
+      globalApts = dbData.map(cita => {
+        // Buscar la duración del servicio
+        const svc = SERVICES.find(s => s.id === cita.servicio_id);
+        return {
+          id: cita.id,
+          nombre: cita.nombre,
+          telefono: cita.telefono,
+          email: cita.email,
+          notes: cita.comentarios,
+          service: cita.servicio_nombre || (svc ? svc.name : 'Servicio'),
+          serviceId: cita.servicio_id,
+          price: parseFloat(cita.precio) || (svc ? svc.price : 0),
+          duration: svc ? svc.duration : 30,
+          date: cita.fecha.split('T')[0], // Convertir formato de Supabase
+          time: cita.hora.substring(0,5), // Dejar solo HH:MM
+          status: cita.estado
+        };
+      });
+    }
+  } catch (err) {
+    console.error("Error conectando a la BD:", err);
+  }
 }
+
+// "Trampa" limpia: Hacemos que getApts() devuelva la variable global. 
+// Así no tenemos que reescribir todo el código del calendario.
+function getApts() { return globalApts; }
+function getBlocked() { return globalBlocked; } 
+
+// Cargar datos al entrar a la página
+loadGlobalData();
 
 // ══════════════════════════════════════════════════════
 //  UTILIDADES DE TIEMPO
@@ -470,7 +481,6 @@ async function sendTelegram(msg) {
 function toMins(t) { const [h,m]=t.split(':').map(Number); return h*60+m; }
 function fromMins(m) { return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
 
-// ¿Está el slot ocupado dado el duraciones de citas existentes?
 function isSlotBlocked(dateStr, slotTime) {
   const apts = getApts().filter(a => a.date===dateStr && a.status!=='cancelada');
   const slotM = toMins(slotTime);
@@ -481,7 +491,6 @@ function isSlotBlocked(dateStr, slotTime) {
   });
 }
 
-// ¿El nuevo servicio se solaparía con citas existentes?
 function hasOverlap(dateStr, slotTime, newDuration, excludeId) {
   const apts = getApts().filter(a => a.date===dateStr && a.status!=='cancelada' && a.id!==excludeId);
   const newS = toMins(slotTime);
@@ -494,39 +503,29 @@ function hasOverlap(dateStr, slotTime, newDuration, excludeId) {
 }
 
 // ══════════════════════════════════════════════════════
-//  ESTADO DE BOOKING
+//  ESTADO DE BOOKING Y UI
 // ══════════════════════════════════════════════════════
 let state = { selectedService:null, selectedDate:null, selectedSlot:null,
               calYear: new Date().getFullYear(), calMonth: new Date().getMonth() };
 
-// ══════════════════════════════════════════════════════
-//  SERVICIOS
-// ══════════════════════════════════════════════════════
 function renderServices() {
   document.getElementById('servicesGrid').innerHTML = SERVICES.map(s => `
     <div class="service-card ${state.selectedService?.id===s.id?'selected':''}" onclick="selectService(${s.id})">
       <div class="svc-icon">${s.icon}</div>
       <div class="svc-name">${s.name}</div>
       <div class="svc-desc">${s.desc}</div>
-      <div class="svc-meta">
-        <span class="svc-price">$${s.price} MXN</span>
-        <span class="svc-dur">${s.duration} min</span>
-      </div>
+      <div class="svc-meta"><span class="svc-price">$${s.price} MXN</span><span class="svc-dur">${s.duration} min</span></div>
     </div>`).join('');
 }
 
 function selectService(id) {
   state.selectedService = SERVICES.find(s => s.id===id);
   state.selectedSlot = null;
-  renderServices();
-  updateSummary();
+  renderServices(); updateSummary();
   if (state.selectedDate) renderSlots();
   goTo('agendar');
 }
 
-// ══════════════════════════════════════════════════════
-//  CALENDARIO
-// ══════════════════════════════════════════════════════
 const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 function renderCalendar() {
@@ -565,16 +564,9 @@ function renderCalendar() {
 }
 
 function selectDate(ds) {
-  if (!state.selectedService) {
-    showError('Primero selecciona un servicio de la lista de arriba.');
-    goTo('servicios');
-    return;
-  }
-  state.selectedDate = ds;
-  state.selectedSlot = null;
-  renderCalendar();
-  renderSlots();
-  updateSummary();
+  if (!state.selectedService) { showError('Primero selecciona un servicio.'); goTo('servicios'); return; }
+  state.selectedDate = ds; state.selectedSlot = null;
+  renderCalendar(); renderSlots(); updateSummary();
 }
 
 function changeMonth(dir) {
@@ -584,9 +576,6 @@ function changeMonth(dir) {
   renderCalendar();
 }
 
-// ══════════════════════════════════════════════════════
-//  SLOTS
-// ══════════════════════════════════════════════════════
 function renderSlots() {
   if (!state.selectedDate) { document.getElementById('slotsCard').style.display='none'; return; }
   const d = new Date(state.selectedDate+'T12:00:00');
@@ -605,19 +594,11 @@ function renderSlots() {
       ${!unavail?`onclick="selectSlot('${h}')"`:''} title="${reason}">${h}</div>`;
   }
   document.getElementById('slotsGrid').innerHTML = html;
-  document.getElementById('slotHint').textContent = dur>30 ? `Este servicio dura ${dur} min — los horarios en gris están bloqueados por solapamiento.` : '';
   document.getElementById('slotsCard').style.display = 'block';
 }
 
-function selectSlot(slot) {
-  state.selectedSlot = slot;
-  renderSlots();
-  updateSummary();
-}
+function selectSlot(slot) { state.selectedSlot = slot; renderSlots(); updateSummary(); }
 
-// ══════════════════════════════════════════════════════
-//  RESUMEN
-// ══════════════════════════════════════════════════════
 function updateSummary() {
   const el = document.getElementById('formSummary');
   if (!state.selectedService && !state.selectedDate) { el.style.display='none'; return; }
@@ -628,12 +609,12 @@ function updateSummary() {
   if (state.selectedDate) {
     const d = new Date(state.selectedDate+'T12:00:00');
     document.getElementById('sumDate').textContent = d.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
-  } else document.getElementById('sumDate').textContent = '— (elige una fecha)';
-  document.getElementById('sumTime').textContent = state.selectedSlot || '— (elige un horario)';
+  } else document.getElementById('sumDate').textContent = '—';
+  document.getElementById('sumTime').textContent = state.selectedSlot || '—';
 }
 
 // ══════════════════════════════════════════════════════
-//  SUBMIT BOOKING
+//  SUBMIT BOOKING (AHORA CONECTADO A RENDER/SUPABASE)
 // ══════════════════════════════════════════════════════
 async function submitBooking() {
   hideError();
@@ -642,61 +623,53 @@ async function submitBooking() {
   const email = document.getElementById('fEmail').value.trim();
   const notes = document.getElementById('fNotes').value.trim();
 
-  if (!state.selectedService) { showError('Selecciona un servicio primero.'); goTo('servicios'); return; }
-  if (!state.selectedDate)    { showError('Selecciona una fecha en el calendario.'); return; }
-  if (!state.selectedSlot)    { showError('Selecciona un horario disponible.'); return; }
-  if (!name)                  { showError('El nombre es obligatorio.'); return; }
-  if (!phone)                 { showError('El teléfono es obligatorio.'); return; }
-
-  // Re-validar disponibilidad justo antes de guardar (previene race condition)
-  if (isSlotBlocked(state.selectedDate, state.selectedSlot)) {
-    showError('¡Ese horario acaba de ser reservado! Por favor elige otro.'); renderSlots(); return;
-  }
-  if (hasOverlap(state.selectedDate, state.selectedSlot, state.selectedService.duration, null)) {
-    showError('El servicio se solaparía con otra cita. Por favor elige otro horario.'); renderSlots(); return;
+  if (!state.selectedService || !state.selectedDate || !state.selectedSlot || !name || !phone) {
+    showError('Por favor completa todos los campos obligatorios y selecciona fecha/hora.'); return;
   }
 
-  const apt = {
-    id: Date.now(),
-    nombre: name, telefono: phone, email, notes,
-    service: state.selectedService.name,
-    serviceId: state.selectedService.id,
-    duration: state.selectedService.duration,
-    price: state.selectedService.price,
-    date: state.selectedDate,
-    time: state.selectedSlot,
-    status: 'pendiente',
-    createdAt: new Date().toISOString()
+  // Empaquetar datos para el servidor
+  const payload = {
+    nombre: name,
+    telefono: phone,
+    email: email,
+    servicio_id: state.selectedService.id,
+    fecha: state.selectedDate,
+    hora: state.selectedSlot,
+    comentarios: notes
   };
 
-  const all = getApts();
-  all.push(apt);
-  saveApts(all);
+  try {
+    const response = await fetch(`${API_URL}/citas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
 
-  // Notificación Telegram
-  const fechaLeg = new Date(apt.date+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
-  const endTime  = fromMins(toMins(apt.time) + apt.duration);
-  await sendTelegram(
-    `✂️ <b>¡Nueva Cita Agendada!</b>\n\n`+
-    `👤 <b>Cliente:</b> ${apt.nombre}\n`+
-    `📱 <b>Tel:</b> ${apt.telefono}\n`+
-    `💈 <b>Servicio:</b> ${apt.service} ($${apt.price} MXN)\n`+
-    `📅 <b>Fecha:</b> ${fechaLeg}\n`+
-    `🕐 <b>Hora:</b> ${apt.time} – ${endTime} (${apt.duration} min)\n`+
-    (apt.notes ? `📝 <b>Nota:</b> ${apt.notes}` : '📝 Sin comentarios adicionales')
-  );
+    if (!response.ok) {
+      const errorData = await response.json();
+      showError(errorData.error || 'Error al agendar la cita en el servidor.');
+      return;
+    }
 
-  const d = new Date(apt.date+'T12:00:00');
-  document.getElementById('successMsg').textContent =
-    `${name}, tu cita de "${apt.service}" fue agendada para el ${d.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'})} a las ${apt.time}. ¡Te esperamos!`;
-  document.getElementById('successOverlay').classList.add('show');
+    // Cita guardada. Volver a cargar las citas globales para que se actualice la pantalla.
+    await loadGlobalData(); 
+    
+    // Mostrar mensaje de éxito
+    const d = new Date(state.selectedDate+'T12:00:00');
+    document.getElementById('successMsg').textContent =
+      `${name}, tu cita de "${state.selectedService.name}" fue agendada para el ${d.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'})} a las ${state.selectedSlot}.`;
+    document.getElementById('successOverlay').classList.add('show');
 
-  // Reset form
-  state.selectedService = null; state.selectedDate = null; state.selectedSlot = null;
-  ['fName','fPhone','fEmail','fNotes'].forEach(id => document.getElementById(id).value='');
-  renderServices(); renderCalendar();
-  document.getElementById('slotsCard').style.display='none';
-  updateSummary();
+    // Limpiar formulario
+    state.selectedService = null; state.selectedDate = null; state.selectedSlot = null;
+    ['fName','fPhone','fEmail','fNotes'].forEach(id => document.getElementById(id).value='');
+    renderServices(); renderCalendar();
+    document.getElementById('slotsCard').style.display='none';
+    updateSummary();
+
+  } catch (err) {
+    showError('Error de conexión con el servidor. Verifica tu internet.');
+  }
 }
 
 function showError(msg) {
@@ -707,7 +680,7 @@ function showError(msg) {
 function hideError() { document.getElementById('formError').style.display='none'; }
 
 // ══════════════════════════════════════════════════════
-//  ADMIN AUTH
+//  ADMIN AUTH Y NAVEGACIÓN
 // ══════════════════════════════════════════════════════
 function showAdminModal() { document.getElementById('adminModal').classList.add('show'); setTimeout(()=>document.getElementById('adminPass').focus(),100); }
 function closeModal(id)   { document.getElementById(id).classList.remove('show'); document.getElementById('adminPass').value=''; document.getElementById('passErr').style.display='none'; }
@@ -717,19 +690,10 @@ function checkAdmin() {
     document.getElementById('clientPortal').classList.add('hidden');
     document.getElementById('adminPanel').classList.add('show');
     initAdmin();
-  } else {
-    document.getElementById('passErr').style.display='block';
-  }
+  } else document.getElementById('passErr').style.display='block';
 }
-function exitAdmin() {
-  document.getElementById('adminPanel').classList.remove('show');
-  document.getElementById('clientPortal').classList.remove('hidden');
-  window.scrollTo(0,0);
-}
+function exitAdmin() { document.getElementById('adminPanel').classList.remove('show'); document.getElementById('clientPortal').classList.remove('hidden'); window.scrollTo(0,0); }
 
-// ══════════════════════════════════════════════════════
-//  ADMIN — NAVEGACIÓN
-// ══════════════════════════════════════════════════════
 function showAdminSection(sec, el) {
   document.querySelectorAll('.sidebar-link').forEach(l=>l.classList.remove('active'));
   el.classList.add('active');
@@ -742,7 +706,9 @@ function showAdminSection(sec, el) {
   else if (sec==='config')  renderConfig(c);
 }
 
-function initAdmin() {
+// Cargamos de nuevo de BD al abrir el panel para tener lo más fresco
+async function initAdmin() {
+  await loadGlobalData(); 
   const today = new Date();
   document.getElementById('adminTodayDate').textContent = today.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
   const todayStr = today.toISOString().split('T')[0];
@@ -751,7 +717,7 @@ function initAdmin() {
 }
 
 // ══════════════════════════════════════════════════════
-//  ADMIN — DASHBOARD
+//  ADMIN RENDERERS (DASHBOARD, AGENDA, ETC)
 // ══════════════════════════════════════════════════════
 function renderDashboard(c) {
   const today   = new Date().toISOString().split('T')[0];
@@ -764,9 +730,9 @@ function renderDashboard(c) {
   <div style="margin-bottom:1.5rem"><div class="section-tag">Resumen</div><h2 style="font-size:1.5rem">Dashboard</h2></div>
   <div class="stats-grid">
     <div class="stat-card"><div class="stat-card-label">Citas Hoy</div><div class="stat-card-value">${todayA.length}</div><div class="stat-card-sub">${todayA.filter(a=>a.status==='confirmada').length} confirmadas</div></div>
-    <div class="stat-card"><div class="stat-card-label">Pendientes</div><div class="stat-card-value" style="color:#e0a030">${pending.length}</div><div class="stat-card-sub">por confirmar</div></div>
-    <div class="stat-card"><div class="stat-card-label">Total Citas</div><div class="stat-card-value">${active.length}</div><div class="stat-card-sub">activas en sistema</div></div>
-    <div class="stat-card"><div class="stat-card-label">Ingresos</div><div class="stat-card-value">$${revenue.toLocaleString()}</div><div class="stat-card-sub">servicios completados</div></div>
+    <div class="stat-card"><div class="stat-card-label">Pendientes</div><div class="stat-card-value" style="color:#e0a030">${pending.length}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Total Citas</div><div class="stat-card-value">${active.length}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Ingresos</div><div class="stat-card-value">$${revenue.toLocaleString()}</div></div>
   </div>
   <div style="margin:1.5rem 0 1rem"><div class="section-tag">Hoy</div><h3 style="font-family:var(--font-head);font-size:1.1rem">Citas del día</h3></div>
   ${renderAptsTable(todayA.sort((a,b)=>a.time.localeCompare(b.time)), true)}
@@ -774,56 +740,59 @@ function renderDashboard(c) {
   ${renderAptsTable(active.filter(a=>a.date>today).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).slice(0,5), true)}`;
 }
 
-// ══════════════════════════════════════════════════════
-//  ADMIN — TABLA DE CITAS (con botones de acción)
-// ══════════════════════════════════════════════════════
 function renderAptsTable(apts, showActions=false) {
   if (!apts.length) return `<div class="empty-state">No hay citas en este período.</div>`;
   const rows = apts.map(a => {
     const d = new Date(a.date+'T12:00:00');
-    const end = fromMins(toMins(a.time)+(a.duration||30));
     const statusMap = {pendiente:'status-pending',confirmada:'status-confirm',completada:'status-completada',cancelada:'status-cancelada'};
-    const statusLabel = {pendiente:'Pendiente',confirmada:'Confirmada',completada:'Completada',cancelada:'Cancelada'};
     let actions = '';
     if (showActions) {
       if (a.status==='pendiente')   actions = `<button class="action-btn btn-confirm" onclick="changeAptStatus(${a.id},'confirmada')">✓ Confirmar</button><button class="action-btn btn-cancel" onclick="changeAptStatus(${a.id},'cancelada')">✕ Cancelar</button>`;
       if (a.status==='confirmada')  actions = `<button class="action-btn btn-done" onclick="changeAptStatus(${a.id},'completada')">✔ Completada</button><button class="action-btn btn-cancel" onclick="changeAptStatus(${a.id},'cancelada')">✕ Cancelar</button>`;
-      if (a.status==='completada')  actions = `<span style="font-size:.75rem;color:var(--muted)">Completada</span>`;
-      if (a.status==='cancelada')   actions = `<span style="font-size:.75rem;color:var(--muted)">Cancelada</span>`;
+      if (a.status==='completada' || a.status==='cancelada') actions = `<span style="font-size:.75rem;color:var(--muted)">${a.status}</span>`;
     }
     return `<div class="apt-row">
       <div class="apt-time-col">${a.time}<br><small>${d.toLocaleDateString('es-MX',{day:'numeric',month:'short'})}</small></div>
-      <div><div class="apt-client-name">${a.nombre}</div><div class="apt-client-note" title="${a.notes||''}">${a.telefono}${a.notes?' · '+a.notes:''}</div></div>
-      <div><div class="apt-svc-badge">${a.service}</div><div style="font-size:.72rem;color:var(--muted);margin-top:.2rem">${a.duration} min · $${a.price}</div></div>
-      <div><span class="status-badge ${statusMap[a.status]||'status-pending'}">${statusLabel[a.status]||a.status}</span></div>
+      <div><div class="apt-client-name">${a.nombre}</div><div class="apt-client-note">${a.telefono}</div></div>
+      <div><div class="apt-svc-badge">${a.service}</div></div>
+      <div><span class="status-badge ${statusMap[a.status]}">${a.status}</span></div>
       <div class="apt-actions">${actions}</div>
     </div>`;
   }).join('');
-  return `<div class="apts-table">
-    <div class="apts-table-header"><span>Hora</span><span>Cliente</span><span>Servicio</span><span>Estado</span><span>Acciones</span></div>
-    ${rows}
-  </div>`;
+  return `<div class="apts-table"><div class="apts-table-header"><span>Hora</span><span>Cliente</span><span>Servicio</span><span>Estado</span><span>Acciones</span></div>${rows}</div>`;
 }
 
-function changeAptStatus(id, newStatus) {
-  const all = getApts();
-  const idx = all.findIndex(a=>a.id===id);
-  if (idx===-1) return;
-  all[idx].status = newStatus;
-  saveApts(all);
-  initAdmin();
-  const c = document.getElementById('adminContent');
-  const activeLink = document.querySelector('.sidebar-link.active');
-  if (activeLink) {
-    const sec = activeLink.textContent.trim();
-    if (sec.includes('Dashboard')) renderDashboard(c);
-    else if (sec.includes('Citas'))renderAllApts(c);
+// ══════════════════════════════════════════════════════
+//  CAMBIO DE ESTADO DE CITA (BASE DE DATOS)
+// ══════════════════════════════════════════════════════
+async function changeAptStatus(id, newStatus) {
+  try {
+    const res = await fetch(`${API_URL}/citas/${id}/estado`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ estado: newStatus })
+    });
+    
+    if(res.ok) {
+      await loadGlobalData(); // Refrescar los datos globales
+      
+      // Recargar la vista en la que estemos
+      const c = document.getElementById('adminContent');
+      const activeLink = document.querySelector('.sidebar-link.active');
+      if (activeLink) {
+        const sec = activeLink.textContent.trim();
+        if (sec.includes('Dashboard')) renderDashboard(c);
+        else if (sec.includes('Citas')) renderAllApts(c);
+      }
+    } else {
+      alert("No se pudo cambiar el estado en la BD.");
+    }
+  } catch (err) {
+    alert("Error de red cambiando el estado.");
   }
 }
 
-// ══════════════════════════════════════════════════════
-//  ADMIN — AGENDA SEMANAL
-// ══════════════════════════════════════════════════════
+// (El resto de las funciones de renderizado de la UI se mantienen igual...)
 function renderWeekView(c) {
   const today   = new Date();
   const monday  = new Date(today); monday.setDate(today.getDate()-((today.getDay()+6)%7));
@@ -845,13 +814,9 @@ function renderWeekView(c) {
       body += `<div class="week-slot">${apt?`<div class="apt-block"><div class="apt-name">${apt.nombre}</div><div class="apt-svc">${apt.service}</div></div>`:''}</div>`;
     });
   }
-  c.innerHTML = `<div style="margin-bottom:1.5rem"><div class="section-tag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2></div>
-  <div style="overflow-x:auto"><div class="week-view" style="min-width:600px"><div style="display:contents">${header}</div>${body}</div></div>`;
+  c.innerHTML = `<div style="margin-bottom:1.5rem"><div class="section-tag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2></div><div style="overflow-x:auto"><div class="week-view" style="min-width:600px"><div style="display:contents">${header}</div>${body}</div></div>`;
 }
 
-// ══════════════════════════════════════════════════════
-//  ADMIN — TODAS LAS CITAS
-// ══════════════════════════════════════════════════════
 function renderAllApts(c) {
   const all = getApts().sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
   c.innerHTML = `<div style="margin-bottom:1.5rem"><div class="section-tag">Gestión</div><h2 style="font-size:1.5rem">Todas las Citas</h2></div>
@@ -860,9 +825,7 @@ function renderAllApts(c) {
     <button class="btn-sm btn-sm-gold" onclick="filterApts('pendiente')">Pendientes</button>
     <button class="btn-sm btn-sm-gold" onclick="filterApts('confirmada')">Confirmadas</button>
     <button class="btn-sm btn-sm-gold" onclick="filterApts('completada')">Completadas</button>
-    <button class="btn-sm btn-sm-red"  onclick="filterApts('cancelada')">Canceladas</button>
-  </div>
-  <div id="aptsTableContainer">${renderAptsTable(all, true)}</div>`;
+  </div><div id="aptsTableContainer">${renderAptsTable(all, true)}</div>`;
 }
 
 function filterApts(status) {
@@ -871,185 +834,37 @@ function filterApts(status) {
   document.getElementById('aptsTableContainer').innerHTML = renderAptsTable(filtered, true);
 }
 
-// ══════════════════════════════════════════════════════
-//  ADMIN — DISPONIBILIDAD
-// ══════════════════════════════════════════════════════
 function renderAvailability(c) {
-  const blocked = getBlocked();
   c.innerHTML = `
-  <div style="margin-bottom:1.5rem"><div class="section-tag">Control</div><h2 style="font-size:1.5rem">Gestión de Disponibilidad</h2></div>
-  <div class="avail-grid">
-    <div class="avail-card">
-      <h4>Días Bloqueados</h4>
-      <p>Días cerrados: vacaciones, emergencias, etc. Los clientes no podrán agendar en estas fechas.</p>
-      <div class="blocked-days" id="blockedList">${blocked.map(d=>`<div class="blocked-day-tag" onclick="removeBlock('${d}')">${formatDate(d)} ✕</div>`).join('')||'<span style="color:var(--muted);font-size:.82rem">Sin días bloqueados</span>'}</div>
-      <div class="add-block-row">
-        <div><label style="font-size:.75rem;color:var(--muted);margin-bottom:.3rem;display:block">Selecciona fecha</label><input type="date" id="blockDateInput" style="width:auto"/></div>
-        <div style="margin-top:1.3rem"><button class="btn-sm btn-sm-red" onclick="addBlock()">+ Bloquear día</button></div>
-      </div>
-    </div>
-    <div class="avail-card">
-      <h4>Horarios de Trabajo</h4>
-      <p>Activa o desactiva horas específicas. Los cambios se aplican a todos los días no bloqueados.</p>
-      <div id="hoursToggles">${WORK_HOURS.map((h,i)=>`
-        <div class="hour-row">
-          <span class="hour-label">${h}</span>
-          <label class="toggle-switch"><input type="checkbox" ${i<16?'checked':''} onchange="saveHourToggle(this,'${h}')"><span class="toggle-slider"></span></label>
-          <span style="font-size:.78rem;color:var(--muted);margin-left:.5rem">${i<16?'Disponible':'Desactivado'}</span>
-        </div>`).join('')}
-      </div>
-    </div>
-  </div>`;
+  <div style="margin-bottom:1.5rem"><div class="section-tag">Control</div><h2 style="font-size:1.5rem">Disponibilidad</h2></div>
+  <div class="avail-card"><p>Nota: La gestión de horarios fijos y días bloqueados se administra en la base de datos.</p></div>`;
 }
 
-function addBlock() {
-  const d = document.getElementById('blockDateInput').value;
-  if (!d) { alert('Selecciona una fecha'); return; }
-  const blocked = getBlocked();
-  if (!blocked.includes(d)) { blocked.push(d); saveBlocked(blocked); }
-  renderAvailability(document.getElementById('adminContent'));
-}
-function removeBlock(d) {
-  const blocked = getBlocked().filter(x=>x!==d);
-  saveBlocked(blocked);
-  renderAvailability(document.getElementById('adminContent'));
-}
-function saveHourToggle(el, hour) {
-  // Future: store disabled hours in localStorage
-  const label = el.closest('.hour-row').querySelector('span:last-child');
-  label.textContent = el.checked ? 'Disponible' : 'Desactivado';
-}
-function formatDate(ds) {
-  const d = new Date(ds+'T12:00:00');
-  return d.toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'});
-}
-
-// ══════════════════════════════════════════════════════
-//  ADMIN — CRM
-// ══════════════════════════════════════════════════════
 function renderCRM(c) {
   const map = {};
   getApts().filter(a=>a.status!=='cancelada').forEach(a => {
-    if (!map[a.telefono]) map[a.telefono]={nombre:a.nombre,tel:a.telefono,visits:0,spent:0,last:'',notes:[]};
-    map[a.telefono].visits++;
-    map[a.telefono].spent += a.price;
+    if (!map[a.telefono]) map[a.telefono]={nombre:a.nombre,tel:a.telefono,visits:0,spent:0,last:''};
+    map[a.telefono].visits++; map[a.telefono].spent += a.price;
     if (a.date > map[a.telefono].last) map[a.telefono].last = a.date;
-    if (a.notes) map[a.telefono].notes.push(a.notes);
   });
   const clients = Object.values(map).sort((a,b)=>b.visits-a.visits);
-  if (!clients.length) { c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="section-tag">CRM</div><h2 style="font-size:1.5rem">Clientes</h2></div><div class="empty-state">Aún no hay clientes registrados.</div>`; return; }
-  c.innerHTML = `
-  <div style="margin-bottom:1.5rem"><div class="section-tag">CRM</div><h2 style="font-size:1.5rem">Clientes (${clients.length})</h2></div>
-  <div class="crm-list">
-    <div class="crm-header-row"><span>Nombre</span><span>Teléfono</span><span>Visitas</span><span>Gasto total</span><span>Última visita</span></div>
-    ${clients.map(cl=>`<div class="crm-row">
-      <div class="crm-name">${cl.nombre}</div>
-      <div class="crm-phone">${cl.tel}</div>
-      <div class="crm-visits">${cl.visits}</div>
-      <div class="crm-spent">$${cl.spent.toLocaleString()}</div>
-      <div class="crm-last">${cl.last?formatDate(cl.last):'—'}</div>
-    </div>`).join('')}
-  </div>`;
+  if (!clients.length) { c.innerHTML=`<div class="empty-state">No hay clientes.</div>`; return; }
+  c.innerHTML = `<div style="margin-bottom:1.5rem"><div class="section-tag">CRM</div><h2 style="font-size:1.5rem">Clientes (${clients.length})</h2></div>
+  <div class="crm-list"><div class="crm-header-row"><span>Nombre</span><span>Teléfono</span><span>Visitas</span><span>Gasto</span></div>
+  ${clients.map(cl=>`<div class="crm-row"><div class="crm-name">${cl.nombre}</div><div>${cl.tel}</div><div class="crm-visits">${cl.visits}</div><div class="crm-spent">$${cl.spent}</div></div>`).join('')}</div>`;
 }
 
-// ══════════════════════════════════════════════════════
-//  ADMIN — CONFIGURACIÓN
-// ══════════════════════════════════════════════════════
 function renderConfig(c) {
-  const token  = localStorage.getItem(LS.tgToken)  || '';
-  const chatId = localStorage.getItem(LS.tgChatId) || '';
   c.innerHTML = `
   <div style="margin-bottom:1.5rem"><div class="section-tag">Ajustes</div><h2 style="font-size:1.5rem">Configuración</h2></div>
-
   <div class="config-section">
-    <h4>Notificaciones Telegram</h4>
-    <p>Configura tu bot para recibir alertas al instante cuando alguien agende una cita. <a href="https://t.me/BotFather" style="color:var(--gold)" target="_blank">Obtener token en BotFather →</a></p>
-    <div class="form-group"><label>Token del Bot</label><input type="text" id="cfgToken" value="${token}" placeholder="123456789:ABCdef..." style="font-family:var(--font-body);font-size:.85rem"/></div>
-    <div class="form-group"><label>Tu Chat ID</label><input type="text" id="cfgChatId" value="${chatId}" placeholder="987654321" style="font-family:var(--font-body);font-size:.85rem"/></div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <button class="btn-sm btn-sm-gold" onclick="saveConfig()">Guardar configuración</button>
-      <button class="btn-sm btn-sm-gold" onclick="testTelegram()">Enviar mensaje de prueba</button>
-    </div>
-    <div class="tg-test-result" id="tgTestResult"></div>
-    <div style="margin-top:1rem;background:var(--bg3);border-radius:8px;padding:1rem;font-size:.8rem;color:var(--muted)">
-      <strong style="color:var(--cream)">Cómo obtener estos valores:</strong><br>
-      1. En Telegram busca <strong style="color:var(--gold)">@BotFather</strong> → escribe <code>/newbot</code> → copia el token que te da.<br>
-      2. Busca <strong style="color:var(--gold)">@userinfobot</strong> → escribe <code>/start</code> → copia el número "Id:".<br>
-      3. Busca tu bot nuevo y escríbele <strong>/start</strong> (obligatorio).<br>
-      4. Pega los valores aquí y guarda.
-    </div>
-  </div>
-
-  <div class="reset-zone">
-    <h4>⚠️ Reiniciar Sistema</h4>
-    <p>Borra TODAS las citas y días bloqueados. Esta acción no se puede deshacer. Requiere contraseña especial.</p>
-    <div class="form-group" style="max-width:280px"><label>Contraseña de reset</label><input type="password" id="resetPassInput" placeholder="Contraseña de reinicio"/></div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <button class="btn-sm btn-sm-red" onclick="resetSystem()">Borrar todo y reiniciar</button>
-      <button class="btn-sm btn-sm-red" onclick="resetOnlyApts()">Solo borrar citas</button>
-      <button class="btn-sm btn-sm-red" onclick="resetOnlyBlocked()">Solo borrar días bloqueados</button>
-    </div>
+    <h4>✅ Notificaciones Telegram Activas</h4>
+    <p>Las notificaciones ahora se gestionan de forma segura desde el servidor en la nube de Render mediante la Base de Datos de Supabase. Ya no es necesario ingresar el Token en cada dispositivo.</p>
   </div>`;
 }
 
-function saveConfig() {
-  const t = document.getElementById('cfgToken').value.trim();
-  const c = document.getElementById('cfgChatId').value.trim();
-  localStorage.setItem(LS.tgToken, t);
-  localStorage.setItem(LS.tgChatId, c);
-  showTgResult('✅ Configuración guardada correctamente.', true);
-}
+function goTo(id) { const el = document.getElementById(id); if (el) { el.scrollIntoView({behavior:'smooth', block:'start'}); } }
 
-async function testTelegram() {
-  saveConfig();
-  const ok = await sendTelegram('✂️ <b>BarberElite</b> — Prueba de notificación.\n\nSi ves este mensaje, ¡las notificaciones están funcionando correctamente! 🎉');
-  showTgResult(ok ? '✅ Mensaje enviado con éxito. Revisa tu Telegram.' : '❌ Error al enviar. Verifica el token y el chat ID.', ok);
-}
-
-function showTgResult(msg, ok) {
-  const el = document.getElementById('tgTestResult');
-  el.textContent = msg;
-  el.className = 'tg-test-result ' + (ok ? 'tg-test-ok' : 'tg-test-fail');
-  el.style.display = 'block';
-}
-
-function resetSystem() {
-  const p = document.getElementById('resetPassInput').value;
-  if (p !== RESET_PASS) { alert('Contraseña incorrecta.'); return; }
-  if (!confirm('⚠️ ÚLTIMO AVISO: Se borrarán TODAS las citas y días bloqueados. ¿Continuar?')) return;
-  saveApts([]); saveBlocked([]);
-  document.getElementById('resetPassInput').value = '';
-  alert('Sistema reiniciado. Todas las citas y días bloqueados fueron eliminados.');
-  initAdmin();
-}
-function resetOnlyApts() {
-  const p = document.getElementById('resetPassInput').value;
-  if (p !== RESET_PASS) { alert('Contraseña incorrecta.'); return; }
-  if (!confirm('Se borrarán TODAS las citas. ¿Continuar?')) return;
-  saveApts([]);
-  alert('Citas eliminadas correctamente.');
-  initAdmin();
-}
-function resetOnlyBlocked() {
-  const p = document.getElementById('resetPassInput').value;
-  if (p !== RESET_PASS) { alert('Contraseña incorrecta.'); return; }
-  if (!confirm('Se borrarán todos los días bloqueados. ¿Continuar?')) return;
-  saveBlocked([]);
-  alert('Días bloqueados eliminados.');
-  renderConfig(document.getElementById('adminContent'));
-}
-
-// ══════════════════════════════════════════════════════
-//  UTILIDADES
-// ══════════════════════════════════════════════════════
-function goTo(id) {
-  const el = document.getElementById(id);
-  if (el) { el.scrollIntoView({behavior:'smooth', block:'start'}); }
-}
-
-// ══════════════════════════════════════════════════════
-//  INICIO
-// ══════════════════════════════════════════════════════
 renderServices();
 renderCalendar();
 </script>
