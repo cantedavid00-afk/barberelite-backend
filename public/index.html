@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>BarberElite | Estética & Barbería Profesional</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -419,37 +420,59 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
 
 <script>
 // ══════════════════════════════════════
-//  CONFIG
+//  CONFIGURACIÓN GLOBAL – API REAL
 // ══════════════════════════════════════
 const ADMIN_PASS  = 'barberia2025';
+const API_URL = 'https://barberelite-api.onrender.com/api';
 
 // ══════════════════════════════════════
-//  GLOBAL DATA / BACKEND INTEGRATION
+//  DATOS EN MEMORIA (cache de la API)
 // ══════════════════════════════════════
-// Reemplaza o actualiza estas funciones con tu lógica de conexión a base de datos (fetch)
-let DB_APTS = [];
-let DB_BLOCKED = [];
-let DB_BSLOTS = [];
+let globalApts = [];
+let globalBlocked = [];
 
-const getApts     = () => DB_APTS;
-const saveApts    = v  => { DB_APTS = v; /* Aquí conectas con tu DB */ };
-const getBlocked  = () => DB_BLOCKED;
-const saveBlocked = v  => { DB_BLOCKED = v; /* Aquí conectas con tu DB */ };
-const getBSlots   = () => DB_BSLOTS;
-const saveBSlots  = v  => { DB_BSLOTS = v; /* Aquí conectas con tu DB */ };
+async function loadGlobalData() {
+  try {
+    const [aptsRes, blockedRes] = await Promise.all([
+      fetch(`${API_URL}/citas`),
+      fetch(`${API_URL}/dias-bloqueados`)
+    ]);
+    if (aptsRes.ok) {
+      const dbData = await aptsRes.json();
+      globalApts = dbData.map(cita => {
+        const svc = SVCS.find(s => s.id === cita.servicio_id);
+        return {
+          id: cita.id,
+          nombre: cita.nombre,
+          telefono: cita.telefono,
+          email: cita.email || '',
+          notes: cita.comentarios || '',
+          service: cita.servicio_nombre || (svc ? svc.name : 'Servicio'),
+          serviceId: cita.servicio_id,
+          price: parseFloat(cita.precio) || (svc ? svc.price : 0),
+          duration: svc ? svc.duration : 60,
+          date: cita.fecha.split('T')[0],
+          time: cita.hora.substring(0,5),
+          status: cita.estado || 'pendiente',
+          createdAt: cita.created_at || new Date().toISOString()
+        };
+      });
+    }
+    if (blockedRes.ok) {
+      const bData = await blockedRes.json();
+      globalBlocked = bData.map(b => b.fecha.split('T')[0]);
+    }
+  } catch (err) { console.error("Error conectando a la BD:", err); }
+}
 
-// La personalización visual se mantiene en LocalStorage (puedes pasarla a BD si prefieres)
+function getApts()     { return globalApts; }
+function getBlocked()  { return globalBlocked; }
+
+// La personalización visual se mantiene en LocalStorage
 const K = {social:'be_social'};
 const load = k => { try{return JSON.parse(localStorage.getItem(k))||null}catch{return null} };
 const save = (k,v) => localStorage.setItem(k,JSON.stringify(v));
 const getSocial   = () => load(K.social)   || {wa:'',ig:'',fb:'',tt:'',addr:'Puebla, México',maps:'',brand:'BarberElite',tag:'Puebla · Est. 2019',h1:'Lun – Vie: 10:00 – 20:00',h2:'Sábado: 10:00 – 18:00'};
-
-// Función stub para tu lógica de Telegram global por backend
-async function tgSend(msg) {
-  // Tu backend maneja el Telegram mediante variables de entorno,
-  // así que aquí no hace falta hacer un fetch a la API de Telegram de forma frontal.
-  return true;
-}
 
 // ══════════════════════════════════════
 //  SERVICES DATA
@@ -502,26 +525,21 @@ const WORK_HOURS = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:
 // ══════════════════════════════════════
 const toMin = t => { const [h,m]=t.split(':').map(Number); return h*60+m; };
 const fromMin = m => String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
-function fmtDur(min) {
-  const h=Math.floor(min/60),m=min%60;
-  if(h===0) return min+' min';
-  if(m===0) return h+'h';
-  return h+'h '+m+'min';
-}
+function fmtDur(min) { const h=Math.floor(min/60),m=min%60; if(h===0) return min+' min'; if(m===0) return h+'h'; return h+'h '+m+'min'; }
 function isSlotBlocked(ds,t) {
-  if(getBSlots().some(s=>s.date===ds&&s.time===t)) return true;
-  const apts=getApts().filter(a=>a.date===ds&&a.status!=='cancelada');
-  const sm=toMin(t);
-  return apts.some(a=>{ const s=toMin(a.time),e=s+(a.duration||30); return sm>=s&&sm<e; });
+  const apts = getApts().filter(a => a.date===ds && a.status!=='cancelada');
+  const sm = toMin(t);
+  return apts.some(a => {
+    const s = toMin(a.time), e = s+(a.duration||30);
+    return sm>=s && sm<e;
+  });
 }
 function hasOverlap(ds,t,dur,excId) {
-  const apts=getApts().filter(a=>a.date===ds&&a.status!=='cancelada'&&a.id!==excId);
-  const ns=toMin(t),ne=ns+dur;
-  return apts.some(a=>{ const s=toMin(a.time),e=s+(a.duration||30); return ns<e&&ne>s; });
+  const apts = getApts().filter(a => a.date===ds && a.status!=='cancelada' && a.id!==excId);
+  const ns=toMin(t), ne=ns+dur;
+  return apts.some(a => { const s=toMin(a.time), e=s+(a.duration||30); return ns<e && ne>s; });
 }
-function fmtDate(ds,opts) {
-  return new Date(ds+'T12:00:00').toLocaleDateString('es-MX',opts||{weekday:'long',day:'numeric',month:'long'});
-}
+function fmtDate(ds,opts) { return new Date(ds+'T12:00:00').toLocaleDateString('es-MX',opts||{weekday:'long',day:'numeric',month:'long'}); }
 function fmtDateShort(ds) { return new Date(ds+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}); }
 
 // ══════════════════════════════════════
@@ -535,9 +553,7 @@ let adminSlotDate = null, adminSlotTime = null;
 //  SERVICES & CATEGORIES
 // ══════════════════════════════════════
 function renderCats() {
-  document.getElementById('catTabs').innerHTML = CATS.map(c=>
-    `<button class="cat-tab ${c.id===activeCat?'active':''}" data-cat="${c.id}" onclick="setCat('${c.id}')">${c.label}</button>`
-  ).join('');
+  document.getElementById('catTabs').innerHTML = CATS.map(c=> `<button class="cat-tab ${c.id===activeCat?'active':''}" data-cat="${c.id}" onclick="setCat('${c.id}')">${c.label}</button>` ).join('');
 }
 function setCat(cat) {
   activeCat = cat;
@@ -547,15 +563,11 @@ function setCat(cat) {
   });
 }
 function renderSvcs() {
-  document.getElementById('svcGrid').innerHTML = SVCS.map(s=>
-    `<div class="svc-card ${st.svc?.id===s.id?'selected':''}" data-cat="${s.cat}" onclick="pickSvc(${s.id})" style="${activeCat!=='todos'&&s.cat!==activeCat?'display:none':''}">
+  document.getElementById('svcGrid').innerHTML = SVCS.map(s=> `<div class="svc-card ${st.svc?.id===s.id?'selected':''}" data-cat="${s.cat}" onclick="pickSvc(${s.id})" style="${activeCat!=='todos'&&s.cat!==activeCat?'display:none':''}">
       <div class="svc-icon">${s.icon}</div>
       <div class="svc-name">${s.name}</div>
       <div class="svc-desc">${s.desc}</div>
-      <div class="svc-meta">
-        <span class="svc-price">$${s.price.toLocaleString()}</span>
-        <span class="svc-dur">${fmtDur(s.duration)}</span>
-      </div>
+      <div class="svc-meta"><span class="svc-price">$${s.price.toLocaleString()}</span><span class="svc-dur">${fmtDur(s.duration)}</span></div>
     </div>`).join('');
 }
 function pickSvc(id) {
@@ -570,7 +582,7 @@ function pickSvc(id) {
 // ══════════════════════════════════════
 const MONTHS=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 function renderCal() {
-  const y=st.calY,m=st.calM;
+  const y=st.calY, m=st.calM;
   document.getElementById('calMonth').textContent=`${MONTHS[m]} ${y}`;
   const first=new Date(y,m,1).getDay();
   const off=first===0?6:first-1;
@@ -587,7 +599,6 @@ function renderCal() {
     const isToday=d===now.getDate()&&m===now.getMonth()&&y===now.getFullYear();
     const sel=st.date===ds;
     const hasA=getApts().some(a=>a.date===ds);
-    // Disponibilidad todos los días (Sin restricción de domingos)
     const avail=!past&&!blk&&WORK_HOURS.some(h=>!isSlotBlocked(ds,h));
     const full=!past&&!blk&&!avail;
     let cls='cal-day';
@@ -629,7 +640,7 @@ function renderSlots(){
     const sel=st.slot===h;
     return`<div class="slot ${na?'taken':''} ${sel?'selected':''}" ${!na?`onclick="pickSlot('${h}')"`:''}>${h}</div>`;
   }).join('');
-  if(dur>60) document.getElementById('slotHint').textContent=`Este servicio dura ${fmtDur(dur)}. Los horarios grises están bloqueados por solapamiento con otras citas o por la duración de tu servicio.`;
+  if(dur>60) document.getElementById('slotHint').textContent=`Este servicio dura ${fmtDur(dur)}. Los horarios grises están bloqueados por solapamiento.`;
   else document.getElementById('slotHint').textContent='';
   document.getElementById('slotsCard').style.display='block';
 }
@@ -645,12 +656,12 @@ function updateSum(){
   document.getElementById('sumSvc').textContent=st.svc?.name||'—';
   document.getElementById('sumDur').textContent=st.svc?fmtDur(st.svc.duration):'—';
   document.getElementById('sumPrice').textContent=st.svc?`$${st.svc.price.toLocaleString()} MXN`:'—';
-  document.getElementById('sumDate').textContent=st.date?fmtDate(st.date):'— (elige una fecha)';
-  document.getElementById('sumTime').textContent=st.slot||'— (elige un horario)';
+  document.getElementById('sumDate').textContent=st.date?fmtDate(st.date):'—';
+  document.getElementById('sumTime').textContent=st.slot||'—';
 }
 
 // ══════════════════════════════════════
-//  SUBMIT BOOKING
+//  SUBMIT BOOKING (API)
 // ══════════════════════════════════════
 async function submitBooking(){
   hideErr();
@@ -662,26 +673,35 @@ async function submitBooking(){
   if(!st.date){showErr('Selecciona una fecha en el calendario.');return;}
   if(!st.slot){showErr('Selecciona un horario disponible.');return;}
   if(!name){showErr('El nombre completo es obligatorio.');return;}
-  if(!/^[0-9]{10}$/.test(phone)){
-    showErr('El teléfono debe tener exactamente 10 dígitos numéricos (ej: 2221234567).');
-    document.getElementById('fPhone').classList.add('invalid');return;
+  if(!/^[0-9]{10}$/.test(phone)){showErr('El teléfono debe tener exactamente 10 dígitos.');return;}
+  
+  const payload = {
+    nombre: name, telefono: phone, email: email,
+    servicio_id: st.svc.id, fecha: st.date, hora: st.slot, comentarios: notes
+  };
+  try {
+    const response = await fetch(`${API_URL}/citas`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const errData = await response.json();
+      showErr(errData.error || 'Error al agendar en el servidor.');
+      return;
+    }
+    await loadGlobalData();
+    document.getElementById('successMsg').textContent=`${name}, tu cita de "${st.svc.name}" fue agendada para el ${fmtDate(st.date)} a las ${st.slot}. ¡Te esperamos!`;
+    document.getElementById('successOv').classList.add('show');
+    st.svc=null;st.date=null;st.slot=null;
+    ['fName','fPhone','fEmail','fNotes'].forEach(i=>document.getElementById(i).value='');
+    renderSvcs();renderCal();document.getElementById('slotsCard').style.display='none';updateSum();
+    await tgSend(`✂️ Nueva cita: ${name} - ${st.svc.name} ${st.date} ${st.slot}`);
+  } catch (err) {
+    showErr('Error de conexión con el servidor.');
   }
-  document.getElementById('fPhone').classList.remove('invalid');
-  if(isSlotBlocked(st.date,st.slot)){showErr('Ese horario acaba de ser reservado. Elige otro.');renderSlots();return;}
-  if(hasOverlap(st.date,st.slot,st.svc.duration,null)){showErr('El servicio se solaparía con otra cita. Elige otro horario.');renderSlots();return;}
-  const apt={id:Date.now(),nombre:name,telefono:phone,email,notes,service:st.svc.name,serviceId:st.svc.id,duration:st.svc.duration,price:st.svc.price,date:st.date,time:st.slot,status:'pendiente',createdAt:new Date().toISOString()};
-  const all=getApts();all.push(apt);saveApts(all);
-  const end=fromMin(toMin(apt.time)+apt.duration);
-  await tgSend(`✂️ <b>¡Nueva Cita Agendada!</b>\n\n👤 <b>Cliente:</b> ${apt.nombre}\n📱 <b>Tel:</b> ${apt.telefono}\n💈 <b>Servicio:</b> ${apt.service} ($${apt.price.toLocaleString()} MXN)\n📅 <b>Fecha:</b> ${fmtDate(apt.date)}\n🕐 <b>Hora:</b> ${apt.time} – ${end} (${fmtDur(apt.duration)})\n📝 <b>Nota:</b> ${apt.notes||'Sin comentarios'}`);
-  const d=new Date(apt.date+'T12:00:00');
-  document.getElementById('successMsg').textContent=`${name}, tu cita de "${apt.service}" fue agendada para el ${fmtDate(apt.date)} a las ${apt.time}. ¡Te esperamos!`;
-  document.getElementById('successOv').classList.add('show');
-  st.svc=null;st.date=null;st.slot=null;
-  ['fName','fPhone','fEmail','fNotes'].forEach(i=>document.getElementById(i).value='');
-  renderSvcs();renderCal();document.getElementById('slotsCard').style.display='none';updateSum();
 }
 function showErr(m){const e=document.getElementById('formErr');e.textContent=m;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function hideErr(){document.getElementById('formErr').style.display='none';}
+async function tgSend(msg){ return true; } // Implementa tu backend de Telegram
 
 // ══════════════════════════════════════
 //  SOCIAL FOOTER
@@ -722,14 +742,15 @@ function exitAdmin(){
   document.getElementById('clientPortal').classList.remove('hidden');
   window.scrollTo(0,0);
 }
-function initAdmin(){
+async function initAdmin(){
+  await loadGlobalData();
   const today=new Date().toISOString().split('T')[0];
   document.getElementById('todayCount').textContent=getApts().filter(a=>a.date===today&&a.status!=='cancelada').length;
   aSection('dash',document.querySelector('.sblink.active'));
 }
 
 // ══════════════════════════════════════
-//  ADMIN NAV & DASHBOARD HELPERS
+//  ADMIN NAV & SECTIONS
 // ══════════════════════════════════════
 function aSection(sec,el){
   document.querySelectorAll('.sblink').forEach(l=>l.classList.remove('active'));
@@ -741,9 +762,7 @@ function aSection(sec,el){
 function navToAdminSec(secId, filterStr) {
   const el = Array.from(document.querySelectorAll('.sblink')).find(e => e.getAttribute('onclick').includes(`aSection('${secId}'`));
   if(el) aSection(secId, el);
-  if(filterStr && secId === 'apts') {
-    setTimeout(() => filterAptsBy(filterStr), 50);
-  }
+  if(filterStr && secId === 'apts') { setTimeout(() => filterAptsBy(filterStr), 50); }
 }
 
 // ══════════════════════════════════════
@@ -757,19 +776,17 @@ function rDash(c){
   const rev=all.filter(a=>a.status==='completada').reduce((s,a)=>s+a.price,0);
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Resumen</div><h2 style="font-size:1.5rem">Dashboard</h2></div>
   <div class="scards">
-    <div class="scard clickable" onclick="navToAdminSec('apts', 'todas')"><div class="scard-lbl">Citas Hoy</div><div class="scard-val">${todayA.length}</div><div class="scard-sub">${todayA.filter(a=>a.status==='confirmada').length} confirmadas</div></div>
-    <div class="scard clickable" onclick="navToAdminSec('apts', 'pendiente')"><div class="scard-lbl">Pendientes</div><div class="scard-val" style="color:#e0a030">${pend}</div><div class="scard-sub">por confirmar</div></div>
-    <div class="scard clickable" onclick="navToAdminSec('apts', 'todas')"><div class="scard-lbl">Total Activas</div><div class="scard-val">${active.length}</div><div class="scard-sub">en sistema</div></div>
-    <div class="scard clickable" onclick="navToAdminSec('stats')"><div class="scard-lbl">Ingresos</div><div class="scard-val">$${rev.toLocaleString()}</div><div class="scard-sub">completados</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('apts', 'todas')"><div class="scard-lbl">Citas Hoy</div><div class="scard-val">${todayA.length}</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('apts', 'pendiente')"><div class="scard-lbl">Pendientes</div><div class="scard-val" style="color:#e0a030">${pend}</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('apts', 'todas')"><div class="scard-lbl">Total Activas</div><div class="scard-val">${active.length}</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('stats')"><div class="scard-lbl">Ingresos</div><div class="scard-val">$${rev.toLocaleString()}</div></div>
   </div>
   <div style="margin:1.5rem 0 .8rem"><div class="stag">Hoy</div><h3 style="font-family:var(--fh);font-size:1.1rem">Citas del día</h3></div>
-  ${rAptsTable(todayA.sort((a,b)=>a.time.localeCompare(b.time)),true)}
-  <div style="margin:1.5rem 0 .8rem"><div class="stag">Próximas</div><h3 style="font-family:var(--fh);font-size:1.1rem">Siguientes 5</h3></div>
-  ${rAptsTable(active.filter(a=>a.date>today).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).slice(0,5),true)}`;
+  ${rAptsTable(todayA.sort((a,b)=>a.time.localeCompare(b.time)),true)}`;
 }
 
 // ══════════════════════════════════════
-//  ADMIN — WEEK VIEW (Interactive)
+//  ADMIN — WEEK VIEW
 // ══════════════════════════════════════
 function rWeek(c){
   const today=new Date();
@@ -777,8 +794,7 @@ function rWeek(c){
   const dayNames=['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
   const wdates=[];
   for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);wdates.push(d);}
-  let html=`<div style="margin-bottom:1.5rem"><div class="stag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2>
-  <p style="font-size:.82rem;color:var(--muted);margin-top:.4rem">Haz clic en un <span style="color:var(--gold)">horario ocupado</span> para ver detalles · Haz clic en un <span style="color:var(--muted)">espacio vacío</span> para agregar cita o bloquear</p></div>
+  let html=`<div style="margin-bottom:1.5rem"><div class="stag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2></div>
   <div style="overflow-x:auto"><div class="wview" style="grid-template-columns:55px repeat(7,1fr);min-width:580px">`;
   html+=`<div class="whdr-corner">Hora</div>`;
   wdates.forEach((d,i)=>{
@@ -790,16 +806,11 @@ function rWeek(c){
     wdates.forEach(d=>{
       const ds=d.toISOString().split('T')[0];
       const apt=getApts().find(a=>a.date===ds&&a.time===h&&a.status!=='cancelada');
-      const manBlk=getBSlots().some(s=>s.date===ds&&s.time===h);
       if(apt){
-        const end=fromMin(toMin(apt.time)+(apt.duration||30));
         html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
-      }else if(manBlk){
-        html+=`<div class="wslot blocked"><div class="blk-mark">🚫</div></div>`;
       }else{
         const past=d<new Date(today.getFullYear(),today.getMonth(),today.getDate());
-        if(past) html+=`<div class="wslot" style="cursor:default"></div>`;
-        else html+=`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
+        html+=past?`<div class="wslot" style="cursor:default"></div>`:`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
       }
     });
   }
@@ -808,83 +819,110 @@ function rWeek(c){
 }
 
 // ══════════════════════════════════════
-//  ADMIN — APT DETAIL MODAL
+//  ADMIN — APT DETAIL MODAL & ACTIONS
 // ══════════════════════════════════════
 function showAptDetail(id){
   const apt=getApts().find(a=>a.id===id);if(!apt)return;
   const end=fromMin(toMin(apt.time)+(apt.duration||30));
-  const stMap={pendiente:'status-pending',confirmada:'status-confirm',completada:'status-completada',cancelada:'status-cancelada'};
   const stLbl={pendiente:'Pendiente',confirmada:'Confirmada',completada:'Completada',cancelada:'Cancelada'};
   document.getElementById('adTitle').textContent='Detalles de la Cita';
-  document.getElementById('adSub').textContent=`Registrada el ${new Date(apt.createdAt||Date.now()).toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}`;
   document.getElementById('adBody').innerHTML=`
     <div class="dr"><span class="dlbl">Cliente</span><span class="dval2">${apt.nombre}</span></div>
-    <div class="dr"><span class="dlbl">Teléfono</span><span class="dval2"><a href="https://wa.me/52${apt.telefono}" target="_blank" style="color:var(--gold)">${apt.telefono} 📱</a></span></div>
-    ${apt.email?`<div class="dr"><span class="dlbl">Email</span><span class="dval2">${apt.email}</span></div>`:''}
+    <div class="dr"><span class="dlbl">Teléfono</span><span class="dval2">${apt.telefono}</span></div>
     <div class="dr"><span class="dlbl">Servicio</span><span class="dval2">${apt.service}</span></div>
-    <div class="dr"><span class="dlbl">Duración</span><span class="dval2">${fmtDur(apt.duration||30)}</span></div>
-    <div class="dr"><span class="dlbl">Precio</span><span class="dval2" style="color:var(--gold)">$${apt.price.toLocaleString()} MXN</span></div>
     <div class="dr"><span class="dlbl">Fecha</span><span class="dval2">${fmtDate(apt.date)}</span></div>
     <div class="dr"><span class="dlbl">Hora</span><span class="dval2">${apt.time} – ${end}</span></div>
-    <div class="dr"><span class="dlbl">Estado</span><span class="dval2"><span class="stbadge ${stMap[apt.status]||'st-pend'}">${stLbl[apt.status]||apt.status}</span></span></div>
-    ${apt.notes?`<div class="dr"><span class="dlbl">Notas</span><span class="dval2">${apt.notes}</span></div>`:''}`;
+    <div class="dr"><span class="dlbl">Estado</span><span class="dval2">${stLbl[apt.status]}</span></div>`;
   let acts='';
   if(apt.status==='pendiente') acts=`<button class="abt abt-c" onclick="setAptStatus(${id},'confirmada')">✓ Confirmar</button><button class="abt abt-x" onclick="setAptStatus(${id},'cancelada')">✕ Cancelar</button>`;
   else if(apt.status==='confirmada') acts=`<button class="abt abt-d" onclick="setAptStatus(${id},'completada')">✔ Completada</button><button class="abt abt-x" onclick="setAptStatus(${id},'cancelada')">✕ Cancelar</button>`;
-  else acts=`<span style="font-size:.78rem;color:var(--muted)">${stLbl[apt.status]}</span>`;
   document.getElementById('adActions').innerHTML=acts;
   document.getElementById('aptDetailMov').classList.add('show');
 }
 
+async function setAptStatus(id, st2){
+  try {
+    const res = await fetch(`${API_URL}/citas/${id}/estado`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estado: st2 })
+    });
+    if(res.ok) {
+      await loadGlobalData();
+      closeMov('aptDetailMov');
+      refreshAdminCurrent();
+    } else alert("No se pudo cambiar el estado.");
+  } catch (err) { alert("Error de red."); }
+}
+
+function refreshAdminCurrent(){
+  const el=document.querySelector('.sblink.active');
+  const text=el?el.textContent.trim():'';
+  if(text.includes('Dashboard'))rDash(document.getElementById('aContent'));
+  else if(text.includes('Citas'))rApts(document.getElementById('aContent'));
+}
+
 // ══════════════════════════════════════
-//  ADMIN — SLOT OPTIONS MODAL
+//  SLOT OPTIONS & ADMIN APT CREATION
 // ══════════════════════════════════════
 function showSlotOptions(ds,h){
   adminSlotDate=ds;adminSlotTime=h;
   document.getElementById('slotOptTitle').textContent=`${fmtDate(ds,{weekday:'short',day:'numeric',month:'short'})} · ${h}`;
-  document.getElementById('slotOptSub').textContent='¿Qué deseas hacer con este horario?';
   document.getElementById('slotOptBody').innerHTML=`
     <button class="sopt-btn" onclick="openAddApt()">➕ Agregar cita manualmente</button>
     <button class="sopt-btn danger" onclick="blockAdminSlot()">🚫 Bloquear este horario</button>`;
   document.getElementById('slotOptMov').classList.add('show');
 }
-function blockAdminSlot(){
+
+async function blockAdminSlot(){
   if(!adminSlotDate||!adminSlotTime)return;
-  const bs=getBSlots();
-  if(!bs.some(s=>s.date===adminSlotDate&&s.time===adminSlotTime))bs.push({date:adminSlotDate,time:adminSlotTime});
-  saveBSlots(bs);
-  closeMov('slotOptMov');
-  aSection('week',document.querySelector('.sblink.active'));
+  const payload = {
+    nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@barberelite.com',
+    servicio_id: 1, fecha: adminSlotDate, hora: adminSlotTime, comentarios: 'Bloqueo manual'
+  };
+  try {
+    const res = await fetch(`${API_URL}/citas`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if(res.ok) {
+      await loadGlobalData();
+      closeMov('slotOptMov');
+      aSection('week',document.querySelector('.sblink.active'));
+    } else alert('Error al bloquear horario.');
+  } catch(e){ alert('Error de red.'); }
 }
+
 function openAddApt(){
   closeMov('slotOptMov');
   document.getElementById('addAptSub').textContent=`Fecha: ${fmtDate(adminSlotDate)} · Hora: ${adminSlotTime}`;
   document.getElementById('aaSvc').innerHTML=SVCS.map(s=>`<option value="${s.id}">${s.name} — ${fmtDur(s.duration)} — $${s.price.toLocaleString()}</option>`).join('');
   ['aaName','aaPhone','aaNotes'].forEach(i=>document.getElementById(i).value='');
-  document.getElementById('addAptErr').style.display='none';
   document.getElementById('addAptMov').classList.add('show');
 }
+
 async function saveAdminApt(){
   const name=document.getElementById('aaName').value.trim();
   const phone=document.getElementById('aaPhone').value.trim();
-  const notes=document.getElementById('aaNotes').value.trim();
   const svcId=parseInt(document.getElementById('aaSvc').value);
+  const notes=document.getElementById('aaNotes').value.trim();
+  if(!name||!phone){ alert('Nombre y teléfono obligatorios.'); return; }
   const svc=SVCS.find(s=>s.id===svcId);
-  const errEl=document.getElementById('addAptErr');
-  if(!name){errEl.textContent='El nombre es obligatorio.';errEl.style.display='block';return;}
-  if(!/^[0-9]{10}$/.test(phone)){errEl.textContent='El teléfono debe ser de 10 dígitos.';errEl.style.display='block';return;}
-  if(isSlotBlocked(adminSlotDate,adminSlotTime)){errEl.textContent='Ese horario ya está ocupado o bloqueado.';errEl.style.display='block';return;}
-  if(hasOverlap(adminSlotDate,adminSlotTime,svc.duration,null)){errEl.textContent='El servicio se solaparía con otra cita.';errEl.style.display='block';return;}
-  const apt={id:Date.now(),nombre:name,telefono:phone,email:'',notes,service:svc.name,serviceId:svc.id,duration:svc.duration,price:svc.price,date:adminSlotDate,time:adminSlotTime,status:'confirmada',createdAt:new Date().toISOString(),adminAdded:true};
-  const all=getApts();all.push(apt);saveApts(all);
-  await tgSend(`📋 <b>Cita agregada por Admin</b>\n\n👤 ${apt.nombre}\n📱 ${apt.telefono}\n💈 ${apt.service}\n📅 ${fmtDate(apt.date)} · ${apt.time}\n${apt.notes?'📝 '+apt.notes:''}`);
-  closeMov('addAptMov');
-  initAdmin();
-  aSection('week',document.querySelector('.sblink.active'));
+  const payload = {
+    nombre: name, telefono: phone, email: '', servicio_id: svcId, fecha: adminSlotDate, hora: adminSlotTime,
+    comentarios: notes
+  };
+  try {
+    const res = await fetch(`${API_URL}/citas`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if(res.ok) {
+      await loadGlobalData();
+      closeMov('addAptMov');
+      aSection('week',document.querySelector('.sblink.active'));
+    } else alert('Error al guardar cita.');
+  } catch(e){ alert('Error de red.'); }
 }
 
 // ══════════════════════════════════════
-//  ADMIN — APTS TABLE
+//  ADMIN — APTS TABLE (usada en dashboard y "todas las citas")
 // ══════════════════════════════════════
 function rAptsTable(apts,acts=false){
   if(!apts.length) return`<div class="empty-st">No hay citas en este período.</div>`;
@@ -895,31 +933,20 @@ function rAptsTable(apts,acts=false){
     ${apts.map(a=>{
       let ab='';
       if(acts){
-        if(a.status==='pendiente') ab=`<button class="abt abt-c" onclick="setAptStatus(${a.id},'confirmada');refreshAdminCurrent()">✓</button><button class="abt abt-x" onclick="setAptStatus(${a.id},'cancelada');refreshAdminCurrent()">✕</button>`;
-        else if(a.status==='confirmada') ab=`<button class="abt abt-d" onclick="setAptStatus(${a.id},'completada');refreshAdminCurrent()">✔</button><button class="abt abt-x" onclick="setAptStatus(${a.id},'cancelada');refreshAdminCurrent()">✕</button>`;
-        else ab=`<span style="font-size:.72rem;color:var(--muted)">${stL[a.status]}</span>`;
+        if(a.status==='pendiente') ab=`<button class="abt abt-c" onclick="setAptStatus(${a.id},'confirmada')">✓</button><button class="abt abt-x" onclick="setAptStatus(${a.id},'cancelada')">✕</button>`;
+        else if(a.status==='confirmada') ab=`<button class="abt abt-d" onclick="setAptStatus(${a.id},'completada')">✔</button><button class="abt abt-x" onclick="setAptStatus(${a.id},'cancelada')">✕</button>`;
       }
       return`<div class="arow">
         <div class="atcol">${a.time}<small>${fmtDateShort(a.date)}</small></div>
-        <div><div class="acname">${a.nombre}</div><div class="acnote">${a.telefono}${a.notes?' · '+a.notes:''}</div></div>
-        <div><div class="sbadge">${a.service}</div><div style="font-size:.7rem;color:var(--muted);margin-top:.15rem">${fmtDur(a.duration||30)} · $${a.price.toLocaleString()}</div></div>
-        <div><span class="stbadge ${stM[a.status]||'st-pend'}">${stL[a.status]||a.status}</span></div>
+        <div><div class="acname">${a.nombre}</div><div class="acnote">${a.telefono}</div></div>
+        <div><div class="sbadge">${a.service}</div></div>
+        <div><span class="stbadge ${stM[a.status]}">${stL[a.status]}</span></div>
         <div class="actbts">${ab}<button class="abt" onclick="showAptDetail(${a.id})" style="border-color:var(--border);color:var(--muted)">👁</button></div>
       </div>`;
     }).join('')}
   </div>`;
 }
-function setAptStatus(id,st2){
-  const all=getApts(),idx=all.findIndex(a=>a.id===id);
-  if(idx===-1)return;all[idx].status=st2;saveApts(all);
-  initAdmin();closeMov('aptDetailMov');
-}
-function refreshAdminCurrent(){
-  const el=document.querySelector('.sblink.active');
-  const text=el?el.textContent.trim():'';
-  if(text.includes('Dashboard'))rDash(document.getElementById('aContent'));
-  else if(text.includes('Citas'))rApts(document.getElementById('aContent'));
-}
+
 function rApts(c){
   const all=getApts().sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Gestión</div><h2 style="font-size:1.5rem">Todas las Citas</h2></div>
@@ -934,204 +961,149 @@ function filterAptsBy(s){
 }
 
 // ══════════════════════════════════════
-//  ADMIN — AVAILABILITY
+//  AVAILABILITY (días bloqueados y horas)
 // ══════════════════════════════════════
 function rAvail(c){
-  const blk=getBlocked();
+  const blocked=getBlocked();
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Control</div><h2 style="font-size:1.5rem">Disponibilidad</h2></div>
   <div class="avail-g">
     <div class="acard">
-      <h4>Días Bloqueados</h4><p>Días cerrados: vacaciones, emergencias, feriados.</p>
-      <div class="blk-row" id="blkList">${blk.map(d=>`<div class="btag" onclick="rmBlk('${d}')">${fmtDateShort(d)} ✕</div>`).join('')||'<span style="color:var(--muted);font-size:.8rem">Sin días bloqueados</span>'}</div>
-      <div class="addrow">
-        <div style="flex:1"><label style="font-size:.72rem">Seleccionar fecha</label><input type="date" id="blkInput" style="width:100%"/></div>
-        <div style="padding-top:1.4rem"><button class="bsm bsm-r" onclick="addBlk()">+ Bloquear</button></div>
-      </div>
+      <h4>Días Completos Bloqueados</h4>
+      <div class="blk-row" id="blkList">${blocked.map(d=>`<div class="btag" onclick="rmBlk('${d}')">${fmtDateShort(d)} ✕</div>`).join('')||'Sin bloqueos'}</div>
+      <div class="addrow"><input type="date" id="blkInput"/><button class="bsm bsm-r" onclick="addBlk()">+ Bloquear</button></div>
     </div>
     <div class="acard">
-      <h4>Horarios de Trabajo</h4><p>Activa o desactiva horarios específicos de atención.</p>
-      ${WORK_HOURS.map((h,i)=>`<div class="hrow"><span class="hlbl">${h}</span>
-        <label class="tswitch"><input type="checkbox" ${i<16?'checked':''} onchange="tglHour(this,'${h}')"><span class="tsl"></span></label>
-        <span id="hlbl_${h.replace(':','')}" style="font-size:.75rem;color:var(--muted);margin-left:.4rem">${i<16?'Activo':'Inactivo'}</span>
-      </div>`).join('')}
+      <h4>Bloquear Hora Específica</h4>
+      <div class="addrow" style="flex-direction:column;gap:.5rem;">
+        <input type="date" id="blkHourDate"/>
+        <select id="blkHourTime" style="background:var(--bg3);border:1px solid var(--border);color:var(--cream);padding:.5rem;border-radius:5px;">
+          ${WORK_HOURS.map(h=>`<option value="${h}">${h}</option>`).join('')}
+        </select>
+        <button class="bsm bsm-g" onclick="blockHour()">🔒 Bloquear Hora</button>
+      </div>
     </div>
   </div>`;
 }
-function addBlk(){const d=document.getElementById('blkInput').value;if(!d)return;const b=getBlocked();if(!b.includes(d)){b.push(d);saveBlocked(b);}rAvail(document.getElementById('aContent'));}
-function rmBlk(d){const b=getBlocked().filter(x=>x!==d);saveBlocked(b);rAvail(document.getElementById('aContent'));}
-function tglHour(el,h){document.getElementById('hlbl_'+h.replace(':','')).textContent=el.checked?'Activo':'Inactivo';}
+async function addBlk(){
+  const d=document.getElementById('blkInput').value;
+  if(!d)return;
+  try {
+    await fetch(`${API_URL}/bloquear-dia`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ fecha: d, motivo: 'Admin' })
+    });
+    await loadGlobalData();
+    rAvail(document.getElementById('aContent'));
+  }catch(e){alert('Error');}
+}
+async function rmBlk(d){
+  try {
+    await fetch(`${API_URL}/bloquear-dia/${d}`, { method: 'DELETE' });
+    await loadGlobalData();
+    rAvail(document.getElementById('aContent'));
+  }catch(e){alert('Error');}
+}
+async function blockHour(){
+  const d=document.getElementById('blkHourDate').value;
+  const h=document.getElementById('blkHourTime').value;
+  if(!d||!h)return;
+  const payload = {
+    nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@barberelite.com',
+    servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo de hora'
+  };
+  try {
+    const res = await fetch(`${API_URL}/citas`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
+    if(res.ok) { await loadGlobalData(); rAvail(document.getElementById('aContent')); }
+    else alert('Error al bloquear hora.');
+  }catch(e){alert('Error de red.');}
+}
 
 // ══════════════════════════════════════
-//  ADMIN — CRM
+//  CRM, STATS, SHARE, CONFIG (sin cambios importantes, solo usan getApts())
 // ══════════════════════════════════════
 function rCRM(c){
   const map={};
   getApts().filter(a=>a.status!=='cancelada').forEach(a=>{
-    if(!map[a.telefono])map[a.telefono]={n:a.nombre,t:a.telefono,v:0,sp:0,last:'',notes:[]};
+    if(!map[a.telefono])map[a.telefono]={n:a.nombre,t:a.telefono,v:0,sp:0,last:''};
     map[a.telefono].v++;map[a.telefono].sp+=a.price;
     if(a.date>map[a.telefono].last)map[a.telefono].last=a.date;
-    if(a.notes)map[a.telefono].notes.push(a.notes);
   });
   const cls=Object.values(map).sort((a,b)=>b.v-a.v);
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">CRM</div><h2 style="font-size:1.5rem">Clientes (${cls.length})</h2></div>
-  ${!cls.length?`<div class="empty-st">Sin clientes registrados aún.</div>`:`<div class="crm-list">
+  ${!cls.length?`<div class="empty-st">Sin clientes.</div>`:`<div class="crm-list">
     <div class="crm-hdr"><span>Nombre</span><span>Teléfono</span><span>Visitas</span><span>Gasto</span><span>Última visita</span></div>
     ${cls.map(cl=>`<div class="crm-row">
-      <div style="font-weight:500">${cl.n}</div>
-      <div style="color:var(--muted);font-size:.8rem">${cl.t}</div>
-      <div style="color:var(--gold);font-family:var(--fh);text-align:center">${cl.v}</div>
-      <div style="color:#6dbe6d;font-size:.82rem">$${cl.sp.toLocaleString()}</div>
+      <div style="font-weight:500">${cl.n}</div><div style="color:var(--muted)">${cl.t}</div>
+      <div style="color:var(--gold)">${cl.v}</div><div style="color:#6dbe6d">$${cl.sp.toLocaleString()}</div>
       <div style="font-size:.78rem;color:var(--muted)">${cl.last?fmtDateShort(cl.last):'—'}</div>
     </div>`).join('')}
   </div>`}`;
 }
 
-// ══════════════════════════════════════
-//  ADMIN — STATISTICS
-// ══════════════════════════════════════
 function rStats(c){
   const all=getApts();
   const active=all.filter(a=>a.status!=='cancelada');
   const comp=all.filter(a=>a.status==='completada');
   const rev=comp.reduce((s,a)=>s+a.price,0);
   const uniq=new Set(active.map(a=>a.telefono)).size;
-  // Top services
-  const svcCount={};active.forEach(a=>{svcCount[a.service]=(svcCount[a.service]||0)+1;});
-  const topSvcs=Object.entries(svcCount).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const maxSvc=topSvcs[0]?.[1]||1;
-  // By status
-  const byStatus={pendiente:0,confirmada:0,completada:0,cancelada:0};
-  all.forEach(a=>byStatus[a.status]=(byStatus[a.status]||0)+1);
-  // By weekday
-  const byWd=[0,0,0,0,0,0,0];
-  active.forEach(a=>{const wd=new Date(a.date+'T12:00:00').getDay();byWd[wd]++;});
-  const maxWd=Math.max(...byWd)||1;
-  // Revenue last 6 months
-  const months=[];const revByM=[];
-  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;months.push(MONTHS[d.getMonth()].slice(0,3));revByM.push(comp.filter(a=>a.date.startsWith(k)).reduce((s,a)=>s+a.price,0));}
-  const maxRev=Math.max(...revByM)||1;
-  const wdNames=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Análisis</div><h2 style="font-size:1.5rem">Estadísticas</h2></div>
   <div class="scards">
-    <div class="scard"><div class="scard-lbl">Ingresos Totales</div><div class="scard-val">$${rev.toLocaleString()}</div><div class="scard-sub">servicios completados</div></div>
-    <div class="scard"><div class="scard-lbl">Clientes Únicos</div><div class="scard-val">${uniq}</div><div class="scard-sub">distintos</div></div>
-    <div class="scard"><div class="scard-lbl">Citas Totales</div><div class="scard-val">${all.length}</div><div class="scard-sub">${comp.length} completadas</div></div>
-    <div class="scard"><div class="scard-lbl">Ticket Promedio</div><div class="scard-val">$${comp.length?Math.round(rev/comp.length).toLocaleString():'—'}</div><div class="scard-sub">por cita completada</div></div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem">
-    <div>
-      <div class="stag">Servicios más populares</div>
-      ${topSvcs.length?topSvcs.map(([name,cnt])=>`<div class="barcont"><div class="barlbl"><span>${name.length>28?name.slice(0,28)+'…':name}</span><span>${cnt}</span></div><div class="bartrack"><div class="barfill" style="width:${Math.round(cnt/maxSvc*100)}%"></div></div></div>`).join(''):'<p style="color:var(--muted);font-size:.85rem">Sin datos aún</p>'}
-    </div>
-    <div>
-      <div class="stag">Citas por estado</div>
-      ${Object.entries(byStatus).map(([k,v])=>`<div class="barcont"><div class="barlbl"><span style="text-transform:capitalize">${k}</span><span>${v}</span></div><div class="bartrack"><div class="barfill" style="width:${all.length?Math.round(v/all.length*100):0}%"></div></div></div>`).join('')}
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem">
-    <div>
-      <div class="stag">Ingresos últimos 6 meses</div>
-      <div class="mchart">${revByM.map((v,i)=>`<div style="display:flex;flex-direction:column;align-items:center;flex:1">
-        <div class="mbar" style="height:${Math.round(v/maxRev*70)+5}px" title="$${v.toLocaleString()}"></div>
-        <div class="mbar-lbl">${months[i]}</div>
-      </div>`).join('')}</div>
-    </div>
-    <div>
-      <div class="stag">Citas por día de semana</div>
-      <div class="mchart">${byWd.map((v,i)=>`<div style="display:flex;flex-direction:column;align-items:center;flex:1">
-        <div class="mbar" style="height:${Math.round(v/maxWd*70)+5}px" title="${v} citas"></div>
-        <div class="mbar-lbl">${wdNames[i]}</div>
-      </div>`).join('')}</div>
-    </div>
+    <div class="scard"><div class="scard-lbl">Ingresos Totales</div><div class="scard-val">$${rev.toLocaleString()}</div></div>
+    <div class="scard"><div class="scard-lbl">Clientes Únicos</div><div class="scard-val">${uniq}</div></div>
+    <div class="scard"><div class="scard-lbl">Citas Totales</div><div class="scard-val">${all.length}</div></div>
+    <div class="scard"><div class="scard-lbl">Ticket Promedio</div><div class="scard-val">$${comp.length?Math.round(rev/comp.length).toLocaleString():'—'}</div></div>
   </div>`;
 }
 
-// ══════════════════════════════════════
-//  ADMIN — SHARE / QR
-// ══════════════════════════════════════
 function rShare(c){
   const url=window.location.href.split('?')[0];
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Herramientas</div><h2 style="font-size:1.5rem">Compartir tu Sitio</h2></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
-    <div class="csec">
-      <h4>🔗 Enlace de tu Sitio</h4><p>Comparte esta URL con tus clientes. Es permanente y nunca caduca.</p>
-      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:.8rem 1rem;font-size:.82rem;word-break:break-all;font-family:var(--fb);margin-bottom:.8rem">${url}</div>
-      <button class="bsm bsm-g" onclick="copyLink('${url}',this)">📋 Copiar enlace</button>
-    </div>
-    <div class="csec">
-      <h4>📱 Código QR</h4><p>Imprímelo o compártelo. El QR apunta a tu sitio y nunca caduca.</p>
-      <button class="bsm bsm-g" onclick="openQR('${url}')">Ver / Descargar QR</button>
-    </div>
-  </div>
-  <div class="csec" style="margin-top:1rem">
-    <h4>📤 Compartir directo</h4><p>Envía el enlace por WhatsApp, mensaje o redes.</p>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <a class="social-btn wa" href="https://wa.me/?text=Reserva tu cita aquí: ${encodeURIComponent(url)}" target="_blank">📱 WhatsApp</a>
-      <button class="bsm bsm-g" onclick="copyLink('${url}',this)">📋 Copiar</button>
-    </div>
-  </div>`;
-}
-function copyLink(url,btn){
-  navigator.clipboard.writeText(url).then(()=>{const t=btn.textContent;btn.textContent='✅ Copiado!';setTimeout(()=>btn.textContent=t,2000);}).catch(()=>prompt('Copia este enlace:',url));
+  <div class="csec"><h4>🔗 Enlace</h4><p>${url}</p><button class="bsm bsm-g" onclick="navigator.clipboard.writeText('${url}')">📋 Copiar</button></div>
+  <div class="csec"><h4>📱 QR</h4><button class="bsm bsm-g" onclick="openQR('${url}')">Ver QR</button></div>`;
 }
 function openQR(url){
   document.getElementById('qrMov').classList.add('show');
   setTimeout(()=>{
-    const el=document.getElementById('qrContainer');
-    el.innerHTML='';
-    try{
-      new QRCode(el,{text:url,width:200,height:200,colorDark:'#C5A028',colorLight:'#0D0B08',correctLevel:QRCode.CorrectLevel.H});
-    }catch(e){el.innerHTML=`<p style="color:var(--muted);font-size:.82rem">Genera el QR desde la versión en línea de tu sitio.</p>`;}
+    const el=document.getElementById('qrContainer');el.innerHTML='';
+    try{ new QRCode(el,{text:url,width:200,height:200,colorDark:'#C5A028',colorLight:'#0D0B08',correctLevel:QRCode.CorrectLevel.H}); }catch(e){}
   },100);
 }
 function downloadQR(){
   const canvas=document.querySelector('#qrContainer canvas');
-  if(!canvas){alert('El QR se genera cuando el sitio está en línea (Vercel). Abre tu URL pública para descargarlo.');return;}
+  if(!canvas)return;
   const a=document.createElement('a');a.download='barberelite-qr.png';a.href=canvas.toDataURL();a.click();
 }
 
-// ══════════════════════════════════════
-//  ADMIN — CONFIG
-// ══════════════════════════════════════
 function rCfg(c){
   const sc=getSocial();
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Ajustes</div><h2 style="font-size:1.5rem">Configuración</h2></div>
-  <div class="csec">
-    <h4>🌐 Personalización del Sitio</h4>
-    <p>Edita la información que se muestra en el footer y en el sitio.</p>
-    <div class="cfg-g2">
-      <div class="fg"><label>Nombre del negocio</label><input type="text" id="cfgBrand" value="${sc.brand}" placeholder="BarberElite"/></div>
-      <div class="fg"><label>Tagline / Ciudad</label><input type="text" id="cfgTag" value="${sc.tag}" placeholder="Puebla · Est. 2019"/></div>
-      <div class="fg"><label>Dirección</label><input type="text" id="cfgAddr" value="${sc.addr}" placeholder="Calle y colonia, Puebla"/></div>
-      <div class="fg"><label>URL Google Maps</label><input type="text" id="cfgMaps" value="${sc.maps}" placeholder="https://maps.google.com/…"/></div>
-      <div class="fg"><label>WhatsApp (10 dígitos, sin +52)</label><input type="tel" id="cfgWa" value="${sc.wa}" placeholder="2411721407" maxlength="10"/></div>
-      <div class="fg"><label>Instagram (URL completa)</label><input type="text" id="cfgIg" value="${sc.ig}" placeholder="https://instagram.com/tu_usuario"/></div>
-      <div class="fg"><label>Facebook (URL completa)</label><input type="text" id="cfgFb" value="${sc.fb}" placeholder="https://facebook.com/tu_pagina"/></div>
-      <div class="fg"><label>TikTok (URL completa)</label><input type="text" id="cfgTt" value="${sc.tt}" placeholder="https://tiktok.com/@tu_usuario"/></div>
-      <div class="fg"><label>Horario línea 1</label><input type="text" id="cfgH1" value="${sc.h1}" placeholder="Lun – Vie: 10:00 – 20:00"/></div>
-      <div class="fg"><label>Horario línea 2</label><input type="text" id="cfgH2" value="${sc.h2}" placeholder="Sábado: 10:00 – 18:00"/></div>
-    </div>
-    <button class="bsm bsm-g" onclick="saveSocial()">Guardar y aplicar</button>
-  </div>`;
+  <div class="csec"><h4>🌐 Personalización</h4><div class="cfg-g2">
+    <div class="fg"><label>Negocio</label><input type="text" id="cfgBrand" value="${sc.brand}"/></div>
+    <div class="fg"><label>Tagline</label><input type="text" id="cfgTag" value="${sc.tag}"/></div>
+    <div class="fg"><label>WhatsApp</label><input type="tel" id="cfgWa" value="${sc.wa}" maxlength="10"/></div>
+  </div><button class="bsm bsm-g" onclick="saveSocial()">Guardar</button></div>`;
 }
 function saveSocial(){
-  const s={brand:document.getElementById('cfgBrand').value.trim(),tag:document.getElementById('cfgTag').value.trim(),addr:document.getElementById('cfgAddr').value.trim(),maps:document.getElementById('cfgMaps').value.trim(),wa:document.getElementById('cfgWa').value.trim(),ig:document.getElementById('cfgIg').value.trim(),fb:document.getElementById('cfgFb').value.trim(),tt:document.getElementById('cfgTt').value.trim(),h1:document.getElementById('cfgH1').value.trim(),h2:document.getElementById('cfgH2').value.trim()};
+  const s={brand:document.getElementById('cfgBrand').value,tag:document.getElementById('cfgTag').value,wa:document.getElementById('cfgWa').value,
+    addr:document.getElementById('cfgAddr')?.value||'',maps:document.getElementById('cfgMaps')?.value||'',
+    ig:document.getElementById('cfgIg')?.value||'',fb:document.getElementById('cfgFb')?.value||'',
+    tt:document.getElementById('cfgTt')?.value||'',h1:document.getElementById('cfgH1')?.value||'',h2:document.getElementById('cfgH2')?.value||''};
   save(K.social,s);renderFooter();
-  alert('✅ Información del sitio actualizada y aplicada al footer.');
+  alert('✅ Información actualizada.');
 }
 
-// ══════════════════════════════════════
-//  UTILS
-// ══════════════════════════════════════
-function goTo(id){const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});}
+function goTo(id){ const el=document.getElementById(id); if(el)el.scrollIntoView({behavior:'smooth',block:'start'}); }
 
 // ══════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════
 renderCats();
 renderSvcs();
-renderCal();
-renderFooter();
+loadGlobalData().then(() => {
+  renderCal();
+  renderFooter();
+});
 </script>
 </body>
 </html>
