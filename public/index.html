@@ -130,6 +130,8 @@ textarea{resize:vertical;min-height:90px}
 
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:2rem}
 .stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem}
+.stat-card.clickable{cursor:pointer;transition:transform .2s,border-color .2s}
+.stat-card.clickable:hover{transform:translateY(-3px);border-color:var(--gold)}
 .stat-card-label{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:.5rem}
 .stat-card-value{font-family:var(--font-head);font-size:2rem;color:var(--gold)}
 .stat-card-sub{font-size:.78rem;color:var(--muted);margin-top:.3rem}
@@ -215,7 +217,7 @@ footer strong{color:var(--gold)}
 <body>
 
 <nav>
-  <div class="logo" onclick="goTo('inicio')">✂ Barber<span>Elite</span></div>
+  <div class="logo" onclick="goTo('inicio')">✂ <span id="navBrand">BarberElite</span></div>
   <ul>
     <li><a href="#servicios">Servicios</a></li>
     <li><a href="#agendar">Agendar</a></li>
@@ -231,7 +233,7 @@ footer strong{color:var(--gold)}
     <div class="hero-bg"></div>
     <div class="hero-stripes"><div class="stripe"></div><div class="stripe"></div><div class="stripe"></div></div>
     <div class="hero-content">
-      <div class="hero-tag">Puebla · Est. 2019</div>
+      <div class="hero-tag" id="heroTagLine">Puebla · Est. 2019</div>
       <h1>El Arte de la<br/><em>Barbería</em> Clásica</h1>
       <p class="hero-sub">Cortes de precisión, afeitados tradicionales y cuidado de barba. Tu imagen, nuestra pasión.</p>
       <div class="hero-ctas">
@@ -296,9 +298,9 @@ footer strong{color:var(--gold)}
     </div>
   </section>
 
-  <footer>
-    <p>✂ <strong>BarberElite</strong> · Puebla, México · Todos los derechos reservados 2025</p>
-    <p style="margin-top:.5rem">Lunes a Sábado · 08:00 – 18:00 · Domingos: cerrado</p>
+  <footer id="siteFooter">
+    <p>✂ <strong id="footBrand">BarberElite</strong> · <span id="footTag">Puebla, México</span> · Todos los derechos reservados 2025</p>
+    <p style="margin-top:.5rem" id="footHours">Lunes a Sábado · 08:00 – 18:00 · Domingos: cerrado</p>
   </footer>
 </div>
 
@@ -317,6 +319,7 @@ footer strong{color:var(--gold)}
         <div class="sidebar-link" onclick="showAdminSection('upcoming',this)"><span class="sicon">🕐</span>Todas las Citas</div>
         <div class="sidebar-link" onclick="showAdminSection('availability',this)"><span class="sicon">🔒</span>Disponibilidad</div>
         <div class="sidebar-link" onclick="showAdminSection('crm',this)"><span class="sicon">👤</span>Clientes</div>
+        <div class="sidebar-link" onclick="showAdminSection('config',this)"><span class="sicon">⚙️</span>Configuración</div>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-title">Hoy</div>
@@ -366,10 +369,10 @@ const API_URL = 'https://barberelite-api.onrender.com/api';
 // ══════════════════════════════════════════════════════
 const SERVICES = [
   {id:1, name:'Corte Clásico',       desc:'Corte con tijeras y máquina, acabado con navaja.',              icon:'✂️', price:150, duration:60},
-  {id:2, name:'Corte + Barba',        desc:'Corte completo más arreglo y diseño de barba.',                 icon:'🪒', price:220, duration:60},
+  {id:2, name:'Corte + Barba',       desc:'Corte completo más arreglo y diseño de barba.',                 icon:'🪒', price:220, duration:60},
   {id:3, name:'Afeitado Tradicional', desc:'Afeitado con navaja, toalla caliente y productos premium.',     icon:'🧴', price:120, duration:60},
-  {id:4, name:'Diseño de Barba',      desc:'Perfilado, delineado y definición de barba.',                   icon:'👨', price:100, duration:60},
-  {id:5, name:'Tratamiento Capilar',  desc:'Hidratación profunda y masaje capilar restaurador.',            icon:'💆', price:200, duration:60},
+  {id:4, name:'Diseño de Barba',      desc:'Perfilado, delineado y definición de barba.',                  icon:'👨', price:100, duration:60},
+  {id:5, name:'Tratamiento Capilar',  desc:'Hidratación profunda y masaje capilar restaurador.',             icon:'💆', price:200, duration:60},
   {id:6, name:'Corte Junior',         desc:'Corte para niños menores de 12 años, con cuidado y paciencia.',icon:'🧒', price:100, duration:60},
 ];
 
@@ -410,6 +413,8 @@ async function loadGlobalData() {
 function getApts() { return globalApts; }
 function getBlocked() { return globalBlocked; } 
 
+// Carga configuración visual inicial
+applySiteConfig();
 loadGlobalData().then(() => renderCalendar());
 
 // ══════════════════════════════════════════════════════
@@ -480,21 +485,23 @@ function renderCalendar() {
     const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dt = new Date(ds+'T12:00:00');
     const isPast    = dt < new Date(today.getFullYear(),today.getMonth(),today.getDate());
-    const isSun     = dt.getDay()===0;
     const isBlocked = blocked.includes(ds);
     const isToday   = d===today.getDate()&&m===today.getMonth()&&y===today.getFullYear();
     const isSel     = state.selectedDate===ds;
     const dayApts   = apts.filter(a=>a.date===ds&&a.status!=='cancelada');
+    
+    // NOTA: Se removió la restricción de domingos, todos los días están disponibles
     const avail     = WORK_HOURS.filter(h=>!isSlotBlocked(ds,h));
-    const isFull    = avail.length===0 && !isPast && !isBlocked && !isSun;
+    const isFull    = avail.length===0 && !isPast && !isBlocked;
     const hasApts   = dayApts.length>0;
+    
     let cls = 'cal-day';
-    if (isPast||isSun||isBlocked) cls+=' disabled';
+    if (isPast||isBlocked) cls+=' disabled';
     else if (isFull) cls+=' fully-booked disabled';
     else if (isSel)  cls+=' selected';
     if (isToday) cls+=' today';
     if (hasApts&&!isPast) cls+=' has-apts';
-    const clickable = !isPast&&!isSun&&!isBlocked&&!isFull;
+    const clickable = !isPast&&!isBlocked&&!isFull;
     html += `<div class="${cls}" ${clickable?`onclick="selectDate('${ds}')"`:''} title="${isBlocked?'Día bloqueado':isFull?'Sin horarios':''}"> ${d}</div>`;
   }
   document.getElementById('calGrid').innerHTML = html;
@@ -551,7 +558,7 @@ function updateSummary() {
 }
 
 // ══════════════════════════════════════════════════════
-//  SUBMIT BOOKING (Solo manda datos a Render)
+//  SUBMIT BOOKING (Manda datos a Render, Telegram se maneja en el Backend)
 // ══════════════════════════════════════════════════════
 async function submitBooking() {
   hideError();
@@ -628,6 +635,17 @@ function showAdminSection(sec, el) {
   else if (sec==='upcoming')renderAllApts(c);
   else if (sec==='availability') renderAvailability(c);
   else if (sec==='crm')     renderCRM(c);
+  else if (sec==='config')  renderConfig(c);
+}
+
+// Helper para navegar desde las tarjetas del dashboard
+function navToAdminSec(secId, filterStr) {
+  const links = document.querySelectorAll('.sidebar-link');
+  let targetLink = Array.from(links).find(l => l.getAttribute('onclick').includes(`'${secId}'`));
+  if(targetLink) showAdminSection(secId, targetLink);
+  if(filterStr && secId === 'upcoming') {
+    setTimeout(() => filterApts(filterStr), 50);
+  }
 }
 
 async function initAdmin() {
@@ -649,12 +667,14 @@ function renderDashboard(c) {
   const todayA  = active.filter(a=>a.date===today);
   const pending = allApts.filter(a=>a.status==='pendiente');
   const revenue = active.filter(a=>a.status==='completada').reduce((s,a)=>s+a.price,0);
+  
+  // Dashboard con redirección a tablas con filtros correspondientes
   c.innerHTML = `
   <div style="margin-bottom:1.5rem"><div class="section-tag">Resumen</div><h2 style="font-size:1.5rem">Dashboard</h2></div>
   <div class="stats-grid">
-    <div class="stat-card"><div class="stat-card-label">Citas Hoy</div><div class="stat-card-value">${todayA.length}</div><div class="stat-card-sub">${todayA.filter(a=>a.status==='confirmada').length} confirmadas</div></div>
-    <div class="stat-card"><div class="stat-card-label">Pendientes</div><div class="stat-card-value" style="color:#e0a030">${pending.length}</div></div>
-    <div class="stat-card"><div class="stat-card-label">Total Citas</div><div class="stat-card-value">${active.length}</div></div>
+    <div class="stat-card clickable" onclick="navToAdminSec('upcoming', 'todas')"><div class="stat-card-label">Citas Hoy</div><div class="stat-card-value">${todayA.length}</div><div class="stat-card-sub">${todayA.filter(a=>a.status==='confirmada').length} confirmadas</div></div>
+    <div class="stat-card clickable" onclick="navToAdminSec('upcoming', 'pendiente')"><div class="stat-card-label">Pendientes</div><div class="stat-card-value" style="color:#e0a030">${pending.length}</div></div>
+    <div class="stat-card clickable" onclick="navToAdminSec('upcoming', 'todas')"><div class="stat-card-label">Total Citas</div><div class="stat-card-value">${active.length}</div></div>
     <div class="stat-card"><div class="stat-card-label">Ingresos</div><div class="stat-card-value">$${revenue.toLocaleString()}</div></div>
   </div>
   <div style="margin:1.5rem 0 1rem"><div class="section-tag">Hoy</div><h3 style="font-family:var(--font-head);font-size:1.1rem">Citas del día</h3></div>
@@ -860,6 +880,50 @@ function renderCRM(c) {
   c.innerHTML = `<div style="margin-bottom:1.5rem"><div class="section-tag">CRM</div><h2 style="font-size:1.5rem">Clientes (${clients.length})</h2></div>
   <div class="crm-list"><div class="crm-header-row"><span>Nombre</span><span>Teléfono</span><span>Visitas</span><span>Gasto</span></div>
   ${clients.map(cl=>`<div class="crm-row"><div class="crm-name">${cl.nombre}</div><div>${cl.tel}</div><div class="crm-visits">${cl.visits}</div><div class="crm-spent">$${cl.spent}</div></div>`).join('')}</div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  CONFIGURACIÓN Y PERSONALIZACIÓN DEL SITIO
+// ══════════════════════════════════════════════════════
+function renderConfig(c) {
+  const sc = JSON.parse(localStorage.getItem('be_social')) || {brand:'BarberElite', tag:'Puebla · Est. 2019', h1:'Lunes a Sábado · 08:00 – 18:00', h2:'Domingos: cerrado'};
+  c.innerHTML = `
+    <div style="margin-bottom:1.5rem"><div class="section-tag">Ajustes</div><h2 style="font-size:1.5rem">Personalización</h2></div>
+    <div class="avail-card">
+      <h4>Información del Sitio</h4>
+      <p>Modifica los textos que se ven en el inicio y el pie de página de la web.</p>
+      <div class="add-block-row" style="margin-top:1.2rem; flex-direction:column; align-items:flex-start; gap:0.8rem;">
+        <div style="width:100%"><label style="font-size:.75rem; color:var(--muted)">Nombre de la Barbería</label><input type="text" id="cfgBrand" value="${sc.brand}" style="width:100%"/></div>
+        <div style="width:100%"><label style="font-size:.75rem; color:var(--muted)">Eslogan o Ciudad</label><input type="text" id="cfgTag" value="${sc.tag}" style="width:100%"/></div>
+        <div style="width:100%"><label style="font-size:.75rem; color:var(--muted)">Horario (Línea 1)</label><input type="text" id="cfgH1" value="${sc.h1}" style="width:100%"/></div>
+        <div style="width:100%"><label style="font-size:.75rem; color:var(--muted)">Horario (Línea 2)</label><input type="text" id="cfgH2" value="${sc.h2}" style="width:100%"/></div>
+        <button class="btn-sm btn-sm-gold" onclick="saveSiteConfig()" style="width:100%; margin-top:0.5rem">💾 Guardar Cambios</button>
+      </div>
+    </div>
+  `;
+}
+
+function saveSiteConfig() {
+  const sc = {
+    brand: document.getElementById('cfgBrand').value.trim(),
+    tag: document.getElementById('cfgTag').value.trim(),
+    h1: document.getElementById('cfgH1').value.trim(),
+    h2: document.getElementById('cfgH2').value.trim()
+  };
+  localStorage.setItem('be_social', JSON.stringify(sc));
+  applySiteConfig();
+  alert('✅ Configuración visual actualizada y guardada correctamente.');
+}
+
+function applySiteConfig() {
+  const sc = JSON.parse(localStorage.getItem('be_social'));
+  if (!sc) return;
+  // Actualiza elementos del DOM si existen
+  if (document.getElementById('navBrand')) document.getElementById('navBrand').textContent = sc.brand.replace('Barber','');
+  if (document.getElementById('footBrand')) document.getElementById('footBrand').textContent = sc.brand;
+  if (document.getElementById('footTag')) document.getElementById('footTag').textContent = sc.tag;
+  if (document.getElementById('footHours')) document.getElementById('footHours').textContent = `${sc.h1} · ${sc.h2}`;
+  if (document.getElementById('heroTagLine')) document.getElementById('heroTagLine').textContent = sc.tag;
 }
 
 function goTo(id) { const el = document.getElementById(id); if (el) { el.scrollIntoView({behavior:'smooth', block:'start'}); } }
