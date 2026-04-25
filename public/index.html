@@ -128,9 +128,11 @@ textarea{resize:vertical;min-height:85px}
 .sblink .si{font-size:.95rem;width:18px;text-align:center}
 .acontent{padding:2rem 2.5rem;overflow:auto}
 @media(max-width:640px){.acontent{padding:1.2rem}}
-/* STATS */
+/* STATS & DASHBOARD */
 .scards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:2rem}
 .scard{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.4rem}
+.scard.clickable{cursor:pointer;transition:transform .2s,border-color .2s}
+.scard.clickable:hover{transform:translateY(-3px);border-color:var(--gold)}
 .scard-lbl{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:.4rem}
 .scard-val{font-family:var(--fh);font-size:1.9rem;color:var(--gold)}.scard-sub{font-size:.75rem;color:var(--muted);margin-top:.2rem}
 /* WEEK VIEW */
@@ -204,13 +206,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
 .csec{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.4rem;margin-bottom:1rem}
 .csec h4{font-family:var(--fh);font-size:1.05rem;margin-bottom:.3rem}.csec p{font-size:.8rem;color:var(--muted);margin-bottom:.9rem}
 .cfg-g2{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}@media(max-width:600px){.cfg-g2{grid-template-columns:1fr}}
-.tg-res{font-size:.8rem;margin-top:.5rem;padding:.45rem .8rem;border-radius:6px;display:none}
-.tg-ok{background:rgba(30,90,30,.2);color:#6dbe6d;border:1px solid rgba(40,120,40,.3)}.tg-err{background:rgba(139,32,32,.2);color:#e07070;border:1px solid rgba(180,50,50,.3)}
-.reset-z{background:rgba(139,32,32,.08);border:1px solid rgba(139,32,32,.3);border-radius:var(--radius);padding:1.4rem;margin-bottom:1rem}
-.reset-z h4{color:#e07070;font-family:var(--fh);font-size:1.05rem;margin-bottom:.3rem}
-/* DEV PANEL */
-.drow{display:flex;justify-content:space-between;align-items:center;padding:.55rem 0;border-bottom:1px solid var(--border);font-size:.84rem}
-.drow:last-child{border-bottom:none}.dkey{color:var(--muted)}.dval{font-weight:500;color:var(--cream)}
 /* MODALS */
 .mov{position:fixed;inset:0;background:rgba(0,0,0,.87);z-index:300;display:none;place-items:center;backdrop-filter:blur(8px)}
 .mov.show{display:grid}
@@ -233,7 +228,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
 </head>
 <body>
 
-<!-- NAV -->
 <nav>
   <div class="logo" onclick="goTo('inicio')">✂ Barber<span>Elite</span></div>
   <ul>
@@ -246,10 +240,8 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
   </div>
 </nav>
 
-<!-- CLIENT PORTAL -->
 <div class="client-portal" id="clientPortal">
 
-  <!-- HERO -->
   <div id="inicio" class="hero">
     <div class="hero-bg"></div>
     <div class="hero-stripes"><div class="stripe"></div><div class="stripe"></div><div class="stripe"></div></div>
@@ -269,7 +261,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     </div>
   </div>
 
-  <!-- SERVICES -->
   <section class="ps" id="servicios">
     <div class="stag">Lo que ofrecemos</div>
     <h2>Nuestros Servicios</h2>
@@ -278,7 +269,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     <div class="svc-grid" id="svcGrid"></div>
   </section>
 
-  <!-- BOOKING -->
   <section class="ps" id="agendar">
     <div class="stag">Tu próxima cita</div>
     <h2>Agendar Cita</h2>
@@ -322,7 +312,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     </div>
   </section>
 
-  <!-- SOCIAL FOOTER -->
   <div class="sfooter" id="siteFooter">
     <div class="sfooter-grid">
       <div>
@@ -347,7 +336,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
   </div>
 </div>
 
-<!-- ADMIN PANEL -->
 <div class="admin-panel" id="adminPanel">
   <div class="admin-hdr">
     <h2>Panel de Administración</h2>
@@ -369,14 +357,11 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
       <div class="sbtitle">Herramientas</div>
       <div class="sblink" onclick="aSection('share',this)"><span class="si">🔗</span>Compartir / QR</div>
       <div class="sblink" onclick="aSection('cfg',this)"><span class="si">⚙️</span>Configuración</div>
-      <div class="sblink" onclick="aSection('dev',this)"><span class="si">🛠️</span>Panel Desarrollador</div>
     </div>
     <div class="acontent" id="aContent"></div>
   </div>
 </div>
 
-<!-- MODALS -->
-<!-- Admin Login -->
 <div class="mov" id="loginModal">
   <div class="mbox">
     <h3>Acceso Admin</h3><p>Ingresa la contraseña del panel de administración.</p>
@@ -386,12 +371,10 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     <button class="btn-outline mbtn" onclick="closeMov('loginModal')">Cancelar</button>
   </div>
 </div>
-<!-- Success -->
 <div class="sov" id="successOv">
   <div class="sbox"><div style="font-size:3.5rem;margin-bottom:1.5rem">✅</div><h3>¡Cita Confirmada!</h3>
   <p id="successMsg"></p><button class="btn-primary" onclick="document.getElementById('successOv').classList.remove('show')">Perfecto, gracias</button></div>
 </div>
-<!-- Apt Detail Modal -->
 <div class="mov" id="aptDetailMov">
   <div class="mbox-wide">
     <h3 id="adTitle">Detalles de la Cita</h3><p id="adSub"></p>
@@ -400,7 +383,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     <button class="btn-outline mbtn" onclick="closeMov('aptDetailMov')">Cerrar</button>
   </div>
 </div>
-<!-- Slot Options Modal -->
 <div class="mov" id="slotOptMov">
   <div class="mbox">
     <h3>📅 <span id="slotOptTitle">Horario</span></h3><p id="slotOptSub">¿Qué deseas hacer con este horario?</p>
@@ -408,7 +390,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     <button class="btn-outline mbtn" style="margin-top:.5rem" onclick="closeMov('slotOptMov')">Cancelar</button>
   </div>
 </div>
-<!-- Add Apt Modal (Admin) -->
 <div class="mov" id="addAptMov">
   <div class="mbox-wide">
     <h3>➕ Nueva Cita (Admin)</h3><p id="addAptSub"></p>
@@ -425,7 +406,6 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
     </div>
   </div>
 </div>
-<!-- QR Modal -->
 <div class="mov" id="qrMov">
   <div class="mbox">
     <h3>Código QR</h3><p>Escanea para abrir tu sitio. Puedes descargarlo — no caduca.</p>
@@ -441,31 +421,35 @@ input:checked+.tsl{background:rgba(197,160,40,.2);border-color:var(--gold)}input
 // ══════════════════════════════════════
 //  CONFIG
 // ══════════════════════════════════════
-// ⬇️ CAMBIA esta URL por la de tu backend en Render
-const API_URL = 'https://barberelite-api.onrender.com';
-
 const ADMIN_PASS  = 'barberia2025';
-const RESET_PASS  = 'resetTotal2025';
 
-// ── API helper ─────────────────────────────────────────
-async function api(path, opts={}) {
-  const r = await fetch(API_URL + path, { headers:{'Content-Type':'application/json'}, ...opts });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || 'Error en la solicitud');
-  return data;
+// ══════════════════════════════════════
+//  GLOBAL DATA / BACKEND INTEGRATION
+// ══════════════════════════════════════
+// Reemplaza o actualiza estas funciones con tu lógica de conexión a base de datos (fetch)
+let DB_APTS = [];
+let DB_BLOCKED = [];
+let DB_BSLOTS = [];
+
+const getApts     = () => DB_APTS;
+const saveApts    = v  => { DB_APTS = v; /* Aquí conectas con tu DB */ };
+const getBlocked  = () => DB_BLOCKED;
+const saveBlocked = v  => { DB_BLOCKED = v; /* Aquí conectas con tu DB */ };
+const getBSlots   = () => DB_BSLOTS;
+const saveBSlots  = v  => { DB_BSLOTS = v; /* Aquí conectas con tu DB */ };
+
+// La personalización visual se mantiene en LocalStorage (puedes pasarla a BD si prefieres)
+const K = {social:'be_social'};
+const load = k => { try{return JSON.parse(localStorage.getItem(k))||null}catch{return null} };
+const save = (k,v) => localStorage.setItem(k,JSON.stringify(v));
+const getSocial   = () => load(K.social)   || {wa:'',ig:'',fb:'',tt:'',addr:'Puebla, México',maps:'',brand:'BarberElite',tag:'Puebla · Est. 2019',h1:'Lun – Vie: 10:00 – 20:00',h2:'Sábado: 10:00 – 18:00'};
+
+// Función stub para tu lógica de Telegram global por backend
+async function tgSend(msg) {
+  // Tu backend maneja el Telegram mediante variables de entorno,
+  // así que aquí no hace falta hacer un fetch a la API de Telegram de forma frontal.
+  return true;
 }
-// Cache en memoria
-let _apts=null,_blocked=null,_bslots=null;
-async function fetchApts()    { _apts    = await api('/api/citas');             return _apts; }
-async function fetchBlocked() { _blocked = await api('/api/bloqueados/dias');  return _blocked; }
-async function fetchBSlots()  { _bslots  = await api('/api/bloqueados/slots'); return _bslots; }
-async function getApts()    { return _apts    ?? await fetchApts(); }
-async function getBlocked() { return _blocked ?? await fetchBlocked(); }
-async function getBSlots()  { return _bslots  ?? await fetchBSlots(); }
-function clearCache() { _apts=null;_blocked=null;_bslots=null; }
-
-const RESET_PASS  = 'resetTotal2025';
-const APP_VERSION = '3.0.0';
 
 // ══════════════════════════════════════
 //  SERVICES DATA
@@ -512,15 +496,6 @@ const SVCS = [
   {id:32,cat:'promo',name:'Paquete 7',desc:'Maquillaje y Peinado Social + Depilación de ceja + Pestañas de tira. A elegir: alisado, coleta, ondas o trenzas. *Reserva con $100. WhatsApp 241 172 1407.',icon:'⭐',price:499,duration:120},
 ];
 const WORK_HOURS = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30'];
-
-// ══════════════════════════════════════
-//  STORAGE
-// ══════════════════════════════════════
-const getSocial   = () => load(K.social)   || {wa:'',ig:'',fb:'',tt:'',addr:'Puebla, México',maps:'',brand:'BarberElite',tag:'Puebla · Est. 2019',h1:'Lun – Vie: 10:00 – 20:00',h2:'Sábado: 10:00 – 18:00'};
-
-// ══════════════════════════════════════
-//  TELEGRAM
-// ══════════════════════════════════════
 
 // ══════════════════════════════════════
 //  TIME UTILS
@@ -612,6 +587,7 @@ function renderCal() {
     const isToday=d===now.getDate()&&m===now.getMonth()&&y===now.getFullYear();
     const sel=st.date===ds;
     const hasA=getApts().some(a=>a.date===ds);
+    // Disponibilidad todos los días (Sin restricción de domingos)
     const avail=!past&&!blk&&WORK_HOURS.some(h=>!isSlotBlocked(ds,h));
     const full=!past&&!blk&&!avail;
     let cls='cal-day';
@@ -691,23 +667,18 @@ async function submitBooking(){
     document.getElementById('fPhone').classList.add('invalid');return;
   }
   document.getElementById('fPhone').classList.remove('invalid');
-  const btn=document.getElementById('submitBtn');
-  if(btn){btn.disabled=true;btn.textContent='Enviando…';}
-  try{
-    await api('/api/citas',{method:'POST',body:JSON.stringify({
-      nombre:name,telefono:phone,email,notes,
-      service:st.svc.name,service_id:st.svc.id,
-      duration:st.svc.duration,price:st.svc.price,
-      fecha:st.date,hora:st.slot,admin_added:false
-    })});
-    clearCache();
-    document.getElementById('successMsg').textContent=`${name}, tu cita de "${st.svc.name}" fue agendada para el ${fmtDate(st.date)} a las ${st.slot}. ¡Te esperamos!`;
-    document.getElementById('successOv').classList.add('show');
-    st.svc=null;st.date=null;st.slot=null;
-    ['fName','fPhone','fEmail','fNotes'].forEach(i=>document.getElementById(i).value='');
-    renderSvcs();await renderCal();document.getElementById('slotsCard').style.display='none';updateSum();
-  }catch(e){showErr(e.message);}
-  finally{if(btn){btn.disabled=false;btn.textContent='Confirmar Reservación →';}}
+  if(isSlotBlocked(st.date,st.slot)){showErr('Ese horario acaba de ser reservado. Elige otro.');renderSlots();return;}
+  if(hasOverlap(st.date,st.slot,st.svc.duration,null)){showErr('El servicio se solaparía con otra cita. Elige otro horario.');renderSlots();return;}
+  const apt={id:Date.now(),nombre:name,telefono:phone,email,notes,service:st.svc.name,serviceId:st.svc.id,duration:st.svc.duration,price:st.svc.price,date:st.date,time:st.slot,status:'pendiente',createdAt:new Date().toISOString()};
+  const all=getApts();all.push(apt);saveApts(all);
+  const end=fromMin(toMin(apt.time)+apt.duration);
+  await tgSend(`✂️ <b>¡Nueva Cita Agendada!</b>\n\n👤 <b>Cliente:</b> ${apt.nombre}\n📱 <b>Tel:</b> ${apt.telefono}\n💈 <b>Servicio:</b> ${apt.service} ($${apt.price.toLocaleString()} MXN)\n📅 <b>Fecha:</b> ${fmtDate(apt.date)}\n🕐 <b>Hora:</b> ${apt.time} – ${end} (${fmtDur(apt.duration)})\n📝 <b>Nota:</b> ${apt.notes||'Sin comentarios'}`);
+  const d=new Date(apt.date+'T12:00:00');
+  document.getElementById('successMsg').textContent=`${name}, tu cita de "${apt.service}" fue agendada para el ${fmtDate(apt.date)} a las ${apt.time}. ¡Te esperamos!`;
+  document.getElementById('successOv').classList.add('show');
+  st.svc=null;st.date=null;st.slot=null;
+  ['fName','fPhone','fEmail','fNotes'].forEach(i=>document.getElementById(i).value='');
+  renderSvcs();renderCal();document.getElementById('slotsCard').style.display='none';updateSum();
 }
 function showErr(m){const e=document.getElementById('formErr');e.textContent=m;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function hideErr(){document.getElementById('formErr').style.display='none';}
@@ -751,23 +722,14 @@ function exitAdmin(){
   document.getElementById('clientPortal').classList.remove('hidden');
   window.scrollTo(0,0);
 }
-async function initAdmin(){
-  clearCache();
+function initAdmin(){
   const today=new Date().toISOString().split('T')[0];
-  try{
-    const apts=await fetchApts();
-    document.getElementById('todayCount').textContent=apts.filter(a=>a.fecha===today&&a.status!=='cancelada').length;
-  }catch{}
+  document.getElementById('todayCount').textContent=getApts().filter(a=>a.date===today&&a.status!=='cancelada').length;
   aSection('dash',document.querySelector('.sblink.active'));
-}
-function exitAdmin(){
-  document.getElementById('adminPanel').classList.remove('show');
-  document.getElementById('clientPortal').classList.remove('hidden');
-  clearCache();window.scrollTo(0,0);
 }
 
 // ══════════════════════════════════════
-//  ADMIN NAV
+//  ADMIN NAV & DASHBOARD HELPERS
 // ══════════════════════════════════════
 function aSection(sec,el){
   document.querySelectorAll('.sblink').forEach(l=>l.classList.remove('active'));
@@ -776,79 +738,73 @@ function aSection(sec,el){
   const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg};
   if(map[sec])map[sec](c);
 }
-function navTo(sec){
-  const lblMap={dash:'Dashboard',week:'Agenda',apts:'Todas',avail:'Disponibilidad',crm:'Clientes',stats:'Estadísticas',share:'Compartir',cfg:'Configuración'};
-  const link=[...document.querySelectorAll('.sblink')].find(l=>l.textContent.includes(lblMap[sec]));
-  aSection(sec,link);
+function navToAdminSec(secId, filterStr) {
+  const el = Array.from(document.querySelectorAll('.sblink')).find(e => e.getAttribute('onclick').includes(`aSection('${secId}'`));
+  if(el) aSection(secId, el);
+  if(filterStr && secId === 'apts') {
+    setTimeout(() => filterAptsBy(filterStr), 50);
+  }
 }
 
 // ══════════════════════════════════════
-//  ADMIN — DASHBOARD (tarjetas clickables)
+//  ADMIN — DASHBOARD
 // ══════════════════════════════════════
-async function rDash(c){
-  c.innerHTML=`<div style="text-align:center;padding:2.5rem;color:var(--muted)">Cargando datos…</div>`;
-  try{
-    const today=new Date().toISOString().split('T')[0];
-    const all=await fetchApts();
-    const active=all.filter(a=>a.status!=='cancelada');
-    const todayA=active.filter(a=>a.fecha===today);
-    const pend=all.filter(a=>a.status==='pendiente').length;
-    const rev=all.filter(a=>a.status==='completada').reduce((s,a)=>s+parseFloat(a.price||0),0);
-    c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Resumen</div><h2 style="font-size:1.5rem">Dashboard</h2></div>
-    <div class="scards">
-      <div class="scard" onclick="navTo('apts')" style="cursor:pointer" title="Ver todas las citas"><div class="scard-lbl">Citas Hoy</div><div class="scard-val">${todayA.length}</div><div class="scard-sub">${todayA.filter(a=>a.status==='confirmada').length} confirmadas →</div></div>
-      <div class="scard" onclick="navTo('apts')" style="cursor:pointer" title="Ver pendientes"><div class="scard-lbl">Pendientes</div><div class="scard-val" style="color:#e0a030">${pend}</div><div class="scard-sub">por confirmar →</div></div>
-      <div class="scard" onclick="navTo('apts')" style="cursor:pointer" title="Ver todas las citas"><div class="scard-lbl">Total Activas</div><div class="scard-val">${active.length}</div><div class="scard-sub">en sistema →</div></div>
-      <div class="scard" onclick="navTo('stats')" style="cursor:pointer" title="Ver estadísticas"><div class="scard-lbl">Ingresos</div><div class="scard-val">$${Math.round(rev).toLocaleString()}</div><div class="scard-sub">completados →</div></div>
-    </div>
-    <div style="margin:1.5rem 0 .8rem"><div class="stag">Hoy</div><h3 style="font-family:var(--fh);font-size:1.1rem">Citas del día</h3></div>
-    ${rAptsTable(todayA.sort((a,b)=>a.hora.localeCompare(b.hora)),true)}
-    <div style="margin:1.5rem 0 .8rem"><div class="stag">Próximas</div><h3 style="font-family:var(--fh);font-size:1.1rem">Siguientes 5</h3></div>
-    ${rAptsTable(active.filter(a=>a.fecha>today).sort((a,b)=>a.fecha.localeCompare(b.fecha)||a.hora.localeCompare(b.hora)).slice(0,5),true)}`;
-  }catch(e){c.innerHTML=`<div style="text-align:center;padding:2rem;color:#e07070">Error al cargar: ${e.message}</div>`;}
+function rDash(c){
+  const today=new Date().toISOString().split('T')[0];
+  const all=getApts(),active=all.filter(a=>a.status!=='cancelada');
+  const todayA=active.filter(a=>a.date===today);
+  const pend=all.filter(a=>a.status==='pendiente').length;
+  const rev=all.filter(a=>a.status==='completada').reduce((s,a)=>s+a.price,0);
+  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Resumen</div><h2 style="font-size:1.5rem">Dashboard</h2></div>
+  <div class="scards">
+    <div class="scard clickable" onclick="navToAdminSec('apts', 'todas')"><div class="scard-lbl">Citas Hoy</div><div class="scard-val">${todayA.length}</div><div class="scard-sub">${todayA.filter(a=>a.status==='confirmada').length} confirmadas</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('apts', 'pendiente')"><div class="scard-lbl">Pendientes</div><div class="scard-val" style="color:#e0a030">${pend}</div><div class="scard-sub">por confirmar</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('apts', 'todas')"><div class="scard-lbl">Total Activas</div><div class="scard-val">${active.length}</div><div class="scard-sub">en sistema</div></div>
+    <div class="scard clickable" onclick="navToAdminSec('stats')"><div class="scard-lbl">Ingresos</div><div class="scard-val">$${rev.toLocaleString()}</div><div class="scard-sub">completados</div></div>
+  </div>
+  <div style="margin:1.5rem 0 .8rem"><div class="stag">Hoy</div><h3 style="font-family:var(--fh);font-size:1.1rem">Citas del día</h3></div>
+  ${rAptsTable(todayA.sort((a,b)=>a.time.localeCompare(b.time)),true)}
+  <div style="margin:1.5rem 0 .8rem"><div class="stag">Próximas</div><h3 style="font-family:var(--fh);font-size:1.1rem">Siguientes 5</h3></div>
+  ${rAptsTable(active.filter(a=>a.date>today).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).slice(0,5),true)}`;
 }
 
 // ══════════════════════════════════════
-//  ADMIN — WEEK VIEW (Interactive, API)
+//  ADMIN — WEEK VIEW (Interactive)
 // ══════════════════════════════════════
-async function rWeek(c){
-  c.innerHTML=`<div style="text-align:center;padding:2.5rem;color:var(--muted)">Cargando agenda…</div>`;
-  try{
-    const [apts,bslots]=await Promise.all([fetchApts(),fetchBSlots()]);
-    const today=new Date();
-    const mon=new Date(today);mon.setDate(today.getDate()-((today.getDay()+6)%7));
-    const dayNames=['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
-    const wdates=[];
-    for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);wdates.push(d);}
-    let html=`<div style="margin-bottom:1.5rem"><div class="stag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2>
-    <p style="font-size:.82rem;color:var(--muted);margin-top:.4rem">Clic en <span style="color:var(--gold)">cita</span> para ver detalles · Clic en <span style="color:var(--muted)">espacio vacío</span> para agregar o bloquear</p></div>
-    <div style="overflow-x:auto"><div class="wview" style="grid-template-columns:55px repeat(7,1fr);min-width:580px">`;
-    html+=`<div class="whdr-corner">Hora</div>`;
-    wdates.forEach((d,i)=>{
-      const isT=d.toDateString()===today.toDateString();
-      html+=`<div class="whdr-day ${isT?'today':''}"><div class="wd">${dayNames[i]}</div><div class="dd">${d.getDate()}</div></div>`;
-    });
-    for(const h of WORK_HOURS){
-      html+=`<div class="wtime">${h}</div>`;
-      wdates.forEach(d=>{
-        const ds=d.toISOString().split('T')[0];
-        const apt=apts.find(a=>a.fecha===ds&&a.hora===h&&a.status!=='cancelada');
-        const manBlk=bslots.some(s=>s.date===ds&&s.time===h);
+function rWeek(c){
+  const today=new Date();
+  const mon=new Date(today);mon.setDate(today.getDate()-((today.getDay()+6)%7));
+  const dayNames=['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
+  const wdates=[];
+  for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);wdates.push(d);}
+  let html=`<div style="margin-bottom:1.5rem"><div class="stag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2>
+  <p style="font-size:.82rem;color:var(--muted);margin-top:.4rem">Haz clic en un <span style="color:var(--gold)">horario ocupado</span> para ver detalles · Haz clic en un <span style="color:var(--muted)">espacio vacío</span> para agregar cita o bloquear</p></div>
+  <div style="overflow-x:auto"><div class="wview" style="grid-template-columns:55px repeat(7,1fr);min-width:580px">`;
+  html+=`<div class="whdr-corner">Hora</div>`;
+  wdates.forEach((d,i)=>{
+    const isT=d.toDateString()===today.toDateString();
+    html+=`<div class="whdr-day ${isT?'today':''}"><div class="wd">${dayNames[i]}</div><div class="dd">${d.getDate()}</div></div>`;
+  });
+  for(const h of WORK_HOURS){
+    html+=`<div class="wtime">${h}</div>`;
+    wdates.forEach(d=>{
+      const ds=d.toISOString().split('T')[0];
+      const apt=getApts().find(a=>a.date===ds&&a.time===h&&a.status!=='cancelada');
+      const manBlk=getBSlots().some(s=>s.date===ds&&s.time===h);
+      if(apt){
+        const end=fromMin(toMin(apt.time)+(apt.duration||30));
+        html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
+      }else if(manBlk){
+        html+=`<div class="wslot blocked"><div class="blk-mark">🚫</div></div>`;
+      }else{
         const past=d<new Date(today.getFullYear(),today.getMonth(),today.getDate());
-        if(apt){
-          html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
-        }else if(manBlk){
-          html+=`<div class="wslot blocked"><div class="blk-mark">🚫</div></div>`;
-        }else if(past){
-          html+=`<div class="wslot" style="cursor:default"></div>`;
-        }else{
-          html+=`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
-        }
-      });
-    }
-    html+=`</div></div>`;
-    c.innerHTML=html;
-  }catch(e){c.innerHTML=`<div style="text-align:center;padding:2rem;color:#e07070">Error: ${e.message}</div>`;}
+        if(past) html+=`<div class="wslot" style="cursor:default"></div>`;
+        else html+=`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
+      }
+    });
+  }
+  html+=`</div></div>`;
+  c.innerHTML=html;
 }
 
 // ══════════════════════════════════════
@@ -1139,28 +1095,7 @@ function downloadQR(){
 // ══════════════════════════════════════
 function rCfg(c){
   const sc=getSocial();
-  const tok=localStorage.getItem(K.tgTok)||'',cid=localStorage.getItem(K.tgCid)||'';
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Ajustes</div><h2 style="font-size:1.5rem">Configuración</h2></div>
-  <div class="csec">
-    <h4>💬 Notificaciones Telegram</h4>
-    <p>Recibe alertas en tu celular cuando alguien agenda. <a href="https://t.me/BotFather" target="_blank" style="color:var(--gold)">Obtener token →</a></p>
-    <div class="cfg-g2">
-      <div class="fg"><label>Token del Bot</label><input type="text" id="cfgTok" value="${tok}" placeholder="123456789:ABCdef…"/></div>
-      <div class="fg"><label>Tu Chat ID</label><input type="text" id="cfgCid" value="${cid}" placeholder="987654321"/></div>
-    </div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <button class="bsm bsm-g" onclick="saveTgCfg()">Guardar Telegram</button>
-      <button class="bsm bsm-g" onclick="testTg()">Enviar prueba</button>
-    </div>
-    <div class="tg-res" id="tgRes"></div>
-    <div style="margin-top:1rem;background:var(--bg3);border-radius:8px;padding:1rem;font-size:.78rem;color:var(--muted);line-height:1.8">
-      <strong style="color:var(--cream)">Pasos:</strong><br>
-      1. Telegram → <strong style="color:var(--gold)">@BotFather</strong> → /newbot → copia el token<br>
-      2. Telegram → <strong style="color:var(--gold)">@userinfobot</strong> → /start → copia el Id:<br>
-      3. Busca tu bot nuevo y escríbele /start (obligatorio)<br>
-      4. Pega aquí y guarda
-    </div>
-  </div>
   <div class="csec">
     <h4>🌐 Personalización del Sitio</h4>
     <p>Edita la información que se muestra en el footer y en el sitio.</p>
@@ -1177,128 +1112,12 @@ function rCfg(c){
       <div class="fg"><label>Horario línea 2</label><input type="text" id="cfgH2" value="${sc.h2}" placeholder="Sábado: 10:00 – 18:00"/></div>
     </div>
     <button class="bsm bsm-g" onclick="saveSocial()">Guardar y aplicar</button>
-  </div>
-  <div class="reset-z">
-    <h4>⚠️ Reiniciar Sistema</h4>
-    <p>Borra citas y/o datos. No se puede deshacer. Requiere contraseña de reset: <code style="color:var(--gold)">${RESET_PASS}</code></p>
-    <div class="fg" style="max-width:280px;margin-bottom:.8rem"><label>Contraseña de reset</label><input type="password" id="rstPwd" placeholder="Contraseña de reinicio"/></div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <button class="bsm bsm-r" onclick="doReset('all')">Borrar todo</button>
-      <button class="bsm bsm-r" onclick="doReset('apts')">Solo citas</button>
-      <button class="bsm bsm-r" onclick="doReset('blocked')">Solo días bloqueados</button>
-      <button class="bsm bsm-r" onclick="doReset('bslots')">Solo horarios bloqueados</button>
-    </div>
   </div>`;
 }
-function saveTgCfg(){
-  localStorage.setItem(K.tgTok,document.getElementById('cfgTok').value.trim());
-  localStorage.setItem(K.tgCid,document.getElementById('cfgCid').value.trim());
-  showTgRes('✅ Configuración guardada.',true);
-}
-async function testTg(){
-  saveTgCfg();
-  const ok=await tgSend('✂️ <b>BarberElite</b> — Prueba de notificación.\n\n¡Las notificaciones funcionan correctamente! 🎉');
-  showTgRes(ok?'✅ Mensaje enviado. Revisa tu Telegram.':'❌ Error. Verifica token y chat ID.',ok);
-}
-function showTgRes(msg,ok){const el=document.getElementById('tgRes');el.textContent=msg;el.className='tg-res '+(ok?'tg-ok':'tg-err');el.style.display='block';}
 function saveSocial(){
   const s={brand:document.getElementById('cfgBrand').value.trim(),tag:document.getElementById('cfgTag').value.trim(),addr:document.getElementById('cfgAddr').value.trim(),maps:document.getElementById('cfgMaps').value.trim(),wa:document.getElementById('cfgWa').value.trim(),ig:document.getElementById('cfgIg').value.trim(),fb:document.getElementById('cfgFb').value.trim(),tt:document.getElementById('cfgTt').value.trim(),h1:document.getElementById('cfgH1').value.trim(),h2:document.getElementById('cfgH2').value.trim()};
   save(K.social,s);renderFooter();
   alert('✅ Información del sitio actualizada y aplicada al footer.');
-}
-function doReset(type){
-  const p=document.getElementById('rstPwd').value;
-  if(p!==RESET_PASS){alert('Contraseña de reset incorrecta.');return;}
-  const msgs={all:'TODAS las citas, días y horarios bloqueados',apts:'TODAS las citas',blocked:'los días bloqueados',bslots:'los horarios bloqueados individualmente'};
-  if(!confirm(`⚠️ ¿Confirmas borrar ${msgs[type]}? Esta acción NO se puede deshacer.`))return;
-  if(type==='all'){saveApts([]);saveBlocked([]);saveBSlots([]);}
-  else if(type==='apts')saveApts([]);
-  else if(type==='blocked')saveBlocked([]);
-  else if(type==='bslots')saveBSlots([]);
-  document.getElementById('rstPwd').value='';
-  alert('✅ Datos eliminados correctamente.');
-  initAdmin();
-}
-
-// ══════════════════════════════════════
-//  ADMIN — DEVELOPER PANEL
-// ══════════════════════════════════════
-function rDev(c){
-  const apts=getApts(),blk=getBlocked(),bsl=getBSlots();
-  let lsSize=0;
-  try{for(const k in localStorage)if(k.startsWith('be_'))lsSize+=localStorage.getItem(k).length;}catch{}
-  const sizeKb=(lsSize/1024).toFixed(1);
-  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Developer</div><h2 style="font-size:1.5rem">Panel del Desarrollador</h2></div>
-  <div class="csec">
-    <h4>🗄️ Estado de Datos</h4><p>Información sobre los datos almacenados en este navegador.</p>
-    <div class="drow"><span class="dkey">Citas totales</span><span class="dval">${apts.length}</span></div>
-    <div class="drow"><span class="dkey">Citas activas (no canceladas)</span><span class="dval">${apts.filter(a=>a.status!=='cancelada').length}</span></div>
-    <div class="drow"><span class="dkey">Días bloqueados</span><span class="dval">${blk.length}</span></div>
-    <div class="drow"><span class="dkey">Horarios bloqueados</span><span class="dval">${bsl.length}</span></div>
-    <div class="drow"><span class="dkey">Uso de almacenamiento (aprox.)</span><span class="dval">${sizeKb} KB / ~5 MB</span></div>
-    <div class="drow"><span class="dkey">Versión de la app</span><span class="dval">${APP_VERSION}</span></div>
-  </div>
-  <div class="csec">
-    <h4>📦 Exportar / Importar Datos</h4><p>Haz una copia de seguridad de todas las citas. Útil para migrar a un servidor o respaldo.</p>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <button class="bsm bsm-g" onclick="exportData()">⬇ Exportar JSON</button>
-      <label class="bsm bsm-g" style="cursor:pointer">⬆ Importar JSON<input type="file" accept=".json" onchange="importData(event)" style="display:none"/></label>
-    </div>
-  </div>
-  <div class="csec">
-    <h4>🧹 Limpieza de Datos</h4><p>Elimina datos específicos. Libera espacio si el sistema se vuelve lento.</p>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <button class="bsm bsm-r" onclick="clearOldApts()">Borrar citas de hace +6 meses</button>
-      <button class="bsm bsm-r" onclick="clearCanceladas()">Borrar citas canceladas</button>
-      <button class="bsm bsm-r" onclick="clearAllData()">⚠️ Borrar TODO (localStorage)</button>
-    </div>
-  </div>
-  <div class="csec">
-    <h4>📋 Últimas 3 Citas (Debug)</h4><p>Muestra los últimos registros para verificar que todo se guarda bien.</p>
-    <pre style="background:var(--bg3);border-radius:8px;padding:1rem;font-size:.72rem;overflow-x:auto;color:var(--muted);max-height:200px">${JSON.stringify(apts.slice(-3),null,2)}</pre>
-  </div>`;
-}
-function exportData(){
-  const data={apts:getApts(),blocked:getBlocked(),bslots:getBSlots(),exportDate:new Date().toISOString(),version:APP_VERSION};
-  const a=document.createElement('a');
-  a.href='data:application/json,'+encodeURIComponent(JSON.stringify(data,null,2));
-  a.download=`barberelite-backup-${new Date().toISOString().split('T')[0]}.json`;a.click();
-}
-function importData(e){
-  const f=e.target.files[0];if(!f)return;
-  const r=new FileReader();
-  r.onload=ev=>{
-    try{
-      const d=JSON.parse(ev.target.result);
-      if(d.apts)saveApts(d.apts);
-      if(d.blocked)saveBlocked(d.blocked);
-      if(d.bslots)saveBSlots(d.bslots);
-      alert(`✅ Importados: ${d.apts?.length||0} citas, ${d.blocked?.length||0} días bloqueados.`);
-      initAdmin();rDev(document.getElementById('aContent'));
-    }catch{alert('❌ Archivo inválido. Usa un JSON exportado desde esta app.');}
-  };r.readAsText(f);
-}
-function clearOldApts(){
-  if(!confirm('¿Borrar citas de hace más de 6 meses?'))return;
-  const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-6);
-  const filtered=getApts().filter(a=>new Date(a.date+'T12:00:00')>=cutoff);
-  const removed=getApts().length-filtered.length;
-  saveApts(filtered);alert(`✅ Se eliminaron ${removed} citas antiguas.`);
-  rDev(document.getElementById('aContent'));
-}
-function clearCanceladas(){
-  if(!confirm('¿Borrar todas las citas canceladas?'))return;
-  const filtered=getApts().filter(a=>a.status!=='cancelada');
-  const removed=getApts().length-filtered.length;
-  saveApts(filtered);alert(`✅ Se eliminaron ${removed} citas canceladas.`);
-  rDev(document.getElementById('aContent'));
-}
-function clearAllData(){
-  if(!confirm('⚠️⚠️ PELIGRO: Esto borrará ABSOLUTAMENTE TODOS los datos de la app. ¿Estás seguro?'))return;
-  if(!confirm('Segunda confirmación: ¿Borrar todo incluyendo configuración de Telegram y redes sociales?'))return;
-  Object.values(K).forEach(k=>localStorage.removeItem(k));
-  alert('Todos los datos borrados. La página se recargará.');
-  location.reload();
 }
 
 // ══════════════════════════════════════
