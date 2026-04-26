@@ -848,6 +848,9 @@ const API_URL = 'https://barberelite-api.onrender.com/api';
 let globalApts = [];
 let globalBlocked = [];
 
+// NUEVO: Variable para navegar entre semanas en el Dashboard
+let weekOffset = 0; 
+
 async function loadGlobalData() {
   try {
     const [aptsRes, blockedRes] = await Promise.all([
@@ -1243,6 +1246,7 @@ function aSection(sec,el){
   document.querySelectorAll('.sblink').forEach(l=>l.classList.remove('active'));
   if(el)el.classList.add('active');
   const c=document.getElementById('aContent');
+  if (sec === 'week') weekOffset = 0; // Reinicia la vista a la semana actual al entrar
   const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg};
   if(map[sec])map[sec](c);
 }
@@ -1273,36 +1277,63 @@ function rDash(c){
 }
 
 // ══════════════════════════════════════
-//  ADMIN — WEEK VIEW
+//  ADMIN — WEEK VIEW CON NAVEGACIÓN
 // ══════════════════════════════════════
 function rWeek(c){
-  const today=new Date();
-  const mon=new Date(today);mon.setDate(today.getDate()-((today.getDay()+6)%7));
-  const dayNames=['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
-  const wdates=[];
-  for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);wdates.push(d);}
-  let html=`<div style="margin-bottom:1.5rem"><div class="stag">Semana actual</div><h2 style="font-size:1.5rem">Agenda Semanal</h2></div>
+  const baseDate = new Date();
+  baseDate.setDate(baseDate.getDate() + (weekOffset * 7)); // Aplica el desplazamiento de semana
+  
+  const mon = new Date(baseDate);
+  mon.setDate(baseDate.getDate() - ((baseDate.getDay() + 6) % 7));
+  const dayNames = ['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
+  const wdates = [];
+  for(let i=0; i<7; i++){
+    const d = new Date(mon);
+    d.setDate(mon.getDate() + i);
+    wdates.push(d);
+  }
+  
+  const todayStr = new Date().toDateString();
+
+  let html=`<div style="margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+    <div><div class="stag">Navegación</div><h2 style="font-size:1.5rem">Agenda Semanal</h2></div>
+    <div style="display:flex; gap:0.5rem;">
+      <button class="btn-outline" style="padding:0.4rem 0.8rem; font-size:0.8rem;" onclick="changeWeek(-1)">← Sem. Anterior</button>
+      <button class="btn-outline" style="padding:0.4rem 0.8rem; font-size:0.8rem; ${weekOffset===0 ? 'border-color:var(--accent);color:var(--accent);' : ''}" onclick="changeWeek(0)">Actual</button>
+      <button class="btn-outline" style="padding:0.4rem 0.8rem; font-size:0.8rem;" onclick="changeWeek(1)">Sem. Siguiente →</button>
+    </div>
+  </div>
   <div style="overflow-x:auto"><div class="wview" style="grid-template-columns:55px repeat(7,1fr);min-width:580px">`;
+  
   html+=`<div class="whdr-corner">Hora</div>`;
   wdates.forEach((d,i)=>{
-    const isT=d.toDateString()===today.toDateString();
+    const isT = d.toDateString() === todayStr;
     html+=`<div class="whdr-day ${isT?'today':''}"><div class="wd">${dayNames[i]}</div><div class="dd">${d.getDate()}</div></div>`;
   });
+  
   for(const h of WORK_HOURS){
     html+=`<div class="wtime">${h}</div>`;
     wdates.forEach(d=>{
-      const ds=d.toISOString().split('T')[0];
-      const apt=getApts().find(a=>a.date===ds&&a.time===h&&a.status!=='cancelada');
+      const ds = d.toISOString().split('T')[0];
+      const apt = getApts().find(a=>a.date===ds&&a.time===h&&a.status!=='cancelada');
       if(apt){
         html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
       }else{
-        const past=d<new Date(today.getFullYear(),today.getMonth(),today.getDate());
+        // Solo desactiva clics si el día ya pasó completamente respecto a HOY real
+        const past = d < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
         html+=past?`<div class="wslot" style="cursor:default"></div>`:`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
       }
     });
   }
   html+=`</div></div>`;
   c.innerHTML=html;
+}
+
+// Función para cambiar la semana y refrescar
+function changeWeek(dir) {
+  if (dir === 0) weekOffset = 0;
+  else weekOffset += dir;
+  rWeek(document.getElementById('aContent'));
 }
 
 // ══════════════════════════════════════
@@ -1345,6 +1376,7 @@ function refreshAdminCurrent(){
   const text=el?el.textContent.trim():'';
   if(text.includes('Dashboard'))rDash(document.getElementById('aContent'));
   else if(text.includes('Citas'))rApts(document.getElementById('aContent'));
+  else if(text.includes('Agenda'))rWeek(document.getElementById('aContent'));
 }
 
 // ══════════════════════════════════════
@@ -1361,9 +1393,11 @@ function showSlotOptions(ds,h){
 
 async function blockAdminSlot(){
   if(!adminSlotDate||!adminSlotTime)return;
+  // NUEVO: Agregado notificar: false para evitar envíos indeseados desde el servidor
   const payload = {
     nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
-    servicio_id: 1, fecha: adminSlotDate, hora: adminSlotTime, comentarios: 'Bloqueo manual'
+    servicio_id: 1, fecha: adminSlotDate, hora: adminSlotTime, comentarios: 'Bloqueo manual',
+    notificar: false, enviar_correo: false
   };
   try {
     const res = await fetch(`${API_URL}/citas`, {
@@ -1455,7 +1489,7 @@ function filterAptsBy(s){
 }
 
 // ══════════════════════════════════════
-//  AVAILABILITY MEJORADA
+//  AVAILABILITY MEJORADA CON NOTIFICACIONES
 // ══════════════════════════════════════
 function rAvail(c){
   const blocked = getBlocked();
@@ -1508,6 +1542,8 @@ async function addBlk() {
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
+    // NUEVO: Alerta visual notificando el bloqueo exitoso
+    alert(`✅ El día ${fmtDateShort(d)} ha sido bloqueado correctamente.`);
   } catch(e) { alert('Error al bloquear día.'); }
 }
 
@@ -1534,9 +1570,11 @@ async function blockMultipleHours() {
       alert(`La hora ${h} ya está ocupada. No se bloqueará.`);
       continue;
     }
+    // NUEVO: Agregado notificar: false en el payload
     const payload = {
       nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
-      servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo múltiple'
+      servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo múltiple',
+      notificar: false, enviar_correo: false
     };
     try {
       const res = await fetch(`${API_URL}/citas`, {
@@ -1549,7 +1587,8 @@ async function blockMultipleHours() {
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
-    alert(`✅ ${success} hora(s) bloqueada(s) exitosamente.`);
+    // NUEVO: Alerta visual notificando las horas bloqueadas con éxito
+    alert(`✅ ${success} hora(s) del día ${fmtDateShort(d)} han sido bloqueada(s) exitosamente.`);
   }
 }
 
@@ -1618,8 +1657,46 @@ function rCfg(c){
     <div class="fg"><label>WhatsApp</label><input type="tel" id="cfgWa" value="${sc.wa||'2411721407'}" maxlength="10"/></div>
     <div class="fg"><label>Instagram URL</label><input type="text" id="cfgIg" value="${sc.ig||''}"/></div>
     <div class="fg"><label>Facebook URL</label><input type="text" id="cfgFb" value="${sc.fb||''}"/></div>
-  </div><button class="bsm bsm-g" onclick="saveSocial()">Guardar</button></div>`;
+  </div><button class="bsm bsm-g" onclick="saveSocial()">Guardar</button></div>
+  
+  <div class="csec" style="margin-top:2.5rem; border-top:1px solid var(--border); padding-top:1.5rem;">
+    <h4 style="color:#ef5350; font-family:var(--fh); margin-bottom:0.5rem; font-size:1.2rem;">⚠️ Zona Peligrosa</h4>
+    <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1.2rem;">Borra de manera permanente todas las reservaciones de la base de datos para limpiar el sistema. Esta acción requiere la contraseña de administrador.</p>
+    <button class="bsm bsm-r" onclick="promptDeleteAll()">🗑 Borrar TODAS las Reservaciones</button>
+  </div>`;
 }
+
+// NUEVO: Función para confirmar y borrar la base de datos
+async function promptDeleteAll() {
+  const pass = prompt("Acción Crítica. Ingresa la contraseña de administrador para continuar:");
+  if (pass === null) return; // Canceló
+  
+  if (pass !== ADMIN_PASS) {
+    alert("❌ Contraseña incorrecta. Acción denegada.");
+    return;
+  }
+  
+  const conf = confirm("⚠️ ATENCIÓN: ¿Estás ABSOLUTAMENTE SEGURO de querer eliminar TODAS las reservaciones? Esta acción no se puede deshacer y vaciará completamente tu base de datos.");
+  
+  if (!conf) return;
+
+  try {
+    alert("⏳ Limpiando base de datos, por favor espera...");
+    // Iteramos por todas las citas para llamar al método DELETE de tu API
+    const citasABorrar = getApts();
+    const promesas = citasABorrar.map(a => 
+      fetch(`${API_URL}/citas/${a.id}`, { method: 'DELETE' })
+    );
+    
+    await Promise.all(promesas);
+    await loadGlobalData(); // Recargamos para limpiar todo
+    rCfg(document.getElementById('aContent'));
+    alert("✅ Base de datos limpiada. Todas las reservaciones han sido eliminadas permanentemente.");
+  } catch(e) {
+    alert("❌ Ocurrió un error al intentar conectarse al servidor para borrar las citas.");
+  }
+}
+
 function saveSocial(){
   const s={
     brand:document.getElementById('cfgBrand').value,
