@@ -851,11 +851,13 @@ let weekOffset = 0;
 
 async function loadGlobalData() {
   try {
+    // Si tu backend no tiene la ruta /dias-bloqueados, ignorará el error gracias al catch interno.
     const [aptsRes, blockedRes] = await Promise.all([
-      fetch(`${API_URL}/citas`),
-      fetch(`${API_URL}/dias-bloqueados`)
+      fetch(`${API_URL}/citas`).catch(() => null),
+      fetch(`${API_URL}/dias-bloqueados`).catch(() => null)
     ]);
-    if (aptsRes.ok) {
+    
+    if (aptsRes && aptsRes.ok) {
       const dbData = await aptsRes.json();
       globalApts = dbData.map(cita => {
         const svc = SVCS.find(s => s.id === cita.servicio_id);
@@ -876,10 +878,13 @@ async function loadGlobalData() {
         };
       });
     }
-    if (blockedRes.ok) {
+    
+    if (blockedRes && blockedRes.ok) {
       const bData = await blockedRes.json();
       globalBlocked = bData.map(b => b.fecha.split('T')[0]);
     }
+    
+    // Auto-completamos en tiempo real las citas que ya terminaron.
     await autoCompletePastAppointments();
   } catch (err) { console.error("Error conectando a la BD:", err); }
 }
@@ -899,7 +904,7 @@ const getSocial = () => load(K.social) || {
 };
 
 // ══════════════════════════════════════
-//  SERVICES DATA
+//  SERVICES DATA (32 EXACTOS)
 // ══════════════════════════════════════
 const CATS = [
   {id:'todos',label:'Todos'},{id:'barberia',label:'Barbería 💈'},
@@ -950,28 +955,40 @@ const WORK_HOURS = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:
 const toMin = t => { const [h,m]=t.split(':').map(Number); return h*60+m; };
 const fromMin = m => String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 function fmtDur(min) { const h=Math.floor(min/60),m=min%60; if(h===0) return min+' min'; if(m===0) return h+'h'; return h+'h '+m+'min'; }
+
 function isSlotBlocked(ds,t) {
   const apts = getApts().filter(a => a.date===ds && a.status!=='cancelada');
   const sm = toMin(t);
   return apts.some(a => { const s = toMin(a.time), e = s+(a.duration||30); return sm>=s && sm<e; });
 }
+
 function hasOverlap(ds,t,dur,excId) {
   const apts = getApts().filter(a => a.date===ds && a.status!=='cancelada' && a.id!==excId);
   const ns=toMin(t), ne=ns+dur;
   return apts.some(a => { const s=toMin(a.time), e=s+(a.duration||30); return ns<e && ne>s; });
 }
+
 function fmtDate(ds,opts) { return new Date(ds+'T12:00:00').toLocaleDateString('es-MX',opts||{weekday:'long',day:'numeric',month:'long'}); }
 function fmtDateShort(ds) { return new Date(ds+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}); }
 
 // ══════════════════════════════════════
-//  AUTO-COMPLETE PAST APPOINTMENTS
+//  AUTO-COMPLETAR CITAS EN TIEMPO REAL
 // ══════════════════════════════════════
 async function autoCompletePastAppointments() {
   const now = new Date();
-  const pastApts = globalApts.filter(a =>
-    (a.status === 'pendiente' || a.status === 'confirmada') &&
-    (new Date(a.date + 'T' + a.time) < now)
-  );
+  let changed = false;
+
+  const pastApts = globalApts.filter(a => {
+    if (a.status !== 'pendiente' && a.status !== 'confirmada') return false;
+    
+    // Calculamos el final EXACTO del servicio (hora de inicio + duración)
+    const [h, m] = a.time.split(':').map(Number);
+    const endTime = new Date(a.date + 'T00:00:00'); // Seteamos en la fecha local
+    endTime.setHours(h, m + (a.duration || 30), 0); // Añadimos minutos (pueden superar los 60 y se ajusta la hora)
+    
+    return endTime < now; // Retorna true si ya pasó esa hora final
+  });
+
   for (const apt of pastApts) {
     try {
       await fetch(`${API_URL}/citas/${apt.id}/estado`, {
@@ -979,9 +996,16 @@ async function autoCompletePastAppointments() {
         body: JSON.stringify({ estado: 'completada' })
       });
       apt.status = 'completada';
+      changed = true;
     } catch (e) { console.warn('No se pudo auto-completar cita', apt.id); }
   }
+
+  if (changed && document.getElementById('adminPanel').classList.contains('show')) {
+    refreshAdminCurrent(); // Refresca las tablas frente al administrador silenciosamente
+  }
 }
+// Ejecutamos esto cada minuto (60,000 milisegundos)
+setInterval(autoCompletePastAppointments, 60000);
 
 // ══════════════════════════════════════
 //  BOOKING STATE
@@ -1040,18 +1064,22 @@ function renderCal() {
     const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dt=new Date(ds+'T12:00:00');
     const past=dt<new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    
+    // Verificamos explícitamente si el día está bloqueado globalmente
     const blk=blocked.includes(ds);
     const isToday=d===now.getDate()&&m===now.getMonth()&&y===now.getFullYear();
     const sel=st.date===ds;
     const hasA=getApts().some(a=>a.date===ds);
     const avail=!past&&!blk&&WORK_HOURS.some(h=>!isSlotBlocked(ds,h));
     const full=!past&&!blk&&!avail;
+    
     let cls='cal-day';
     if(past||blk||full) cls+=' disabled';
-    if(full) cls+=' fully-booked';
-    if(sel) cls+=' selected';
+    if(full || blk) cls+=' fully-booked'; // Si está bloqueado, lo pinta de rojo/inactivo
+    if(sel && !blk && !full) cls+=' selected';
     if(isToday) cls+=' today';
-    if(hasA&&!past) cls+=' has-apts';
+    if(hasA&&!past&&!blk) cls+=' has-apts';
+    
     const cl=!past&&!blk&&!full;
     html+=`<div class="${cls}" ${cl?`onclick="pickDate('${ds}')"`:''}>${d}</div>`;
   }
@@ -1093,7 +1121,7 @@ function renderSlots(){
 function pickSlot(h){st.slot=h;renderSlots();updateSum();}
 
 // ══════════════════════════════════════
-//  SUMMARY
+//  SUMMARY & OVERLAPS
 // ══════════════════════════════════════
 function updateSum(){
   const el=document.getElementById('fsum');
@@ -1136,7 +1164,7 @@ function formatSlotSuggestion(date, conflictApt, duration) {
 }
 
 // ══════════════════════════════════════
-//  SUBMIT BOOKING (API LIMPIA)
+//  SUBMIT BOOKING (API)
 // ══════════════════════════════════════
 async function submitBooking(){
   hideErr();
@@ -1259,7 +1287,7 @@ function navToAdminSec(secId, filterStr) {
 // ══════════════════════════════════════
 function rDash(c){
   const today=new Date().toISOString().split('T')[0];
-  const all=getApts(),active=all.filter(a=>a.status!=='cancelada');
+  const all=getApts(),active=all.filter(a=>a.status!=='cancelada' && a.nombre !== 'BLOQUEADO (Admin)');
   const todayA=active.filter(a=>a.date===today);
   const pend=all.filter(a=>a.status==='pendiente').length;
   const rev=all.filter(a=>a.status==='completada').reduce((s,a)=>s+a.price,0);
@@ -1318,7 +1346,10 @@ function rWeek(c){
         html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
       }else{
         const past = d < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-        html+=past?`<div class="wslot" style="cursor:default"></div>`:`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
+        const blkGlobal = getBlocked().includes(ds);
+        
+        // No dejamos interactuar si el día es del pasado O si el día entero está bloqueado
+        html+=(past || blkGlobal)?`<div class="wslot" style="cursor:default; background:rgba(255,45,85,0.03)"></div>`:`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
       }
     });
   }
@@ -1386,10 +1417,11 @@ function showSlotOptions(ds,h){
 
 async function blockAdminSlot(){
   if(!adminSlotDate||!adminSlotTime)return;
+  // Se manda notificar:false para que el servidor de Node decida no enviar el Telegram
   const payload = {
     nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
     servicio_id: 1, fecha: adminSlotDate, hora: adminSlotTime, comentarios: 'Bloqueo manual',
-    notificar: false, enviar_correo: false
+    notificar: false, enviar_correo: false 
   };
   try {
     const res = await fetch(`${API_URL}/citas`, {
@@ -1481,7 +1513,7 @@ function filterAptsBy(s){
 }
 
 // ══════════════════════════════════════
-//  AVAILABILITY - SOLUCION AL BLOQUEO DE DIAS
+//  AVAILABILITY - BLOQUEO DE DIAS Y HORAS
 // ══════════════════════════════════════
 function rAvail(c){
   const blocked = getBlocked();
@@ -1496,7 +1528,7 @@ function rAvail(c){
   <div class="avail-g">
     <div class="acard">
       <h4>📅 Días Bloqueados</h4>
-      <p style="font-size:0.8rem; color:var(--muted);">No se puede bloquear un día si ya tiene reservas activas.</p>
+      <p style="font-size:0.8rem; color:var(--muted);">No se puede bloquear un día si ya tiene reservas activas. (Requiere actualización en servidor Render).</p>
       <div class="blk-row" id="blkList">${blockedHtml}</div>
       <div class="addrow">
         <input type="date" id="blkInput"/>
@@ -1529,44 +1561,27 @@ async function addBlk() {
   }
   
   try {
+    // LLAMA A TU API DE RENDER QUE DEBES CONFIGURAR
     let res = await fetch(`${API_URL}/bloquear-dia`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ fecha: d, motivo: 'Admin' })
     });
 
     if (!res.ok) {
-      console.warn("Fallo endpoint de bloquear día. Ejecutando PLAN B (Bloquear horas)...");
-      let horasBloqueadas = 0;
-      for (const h of WORK_HOURS) {
-        const payload = {
-          nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
-          servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo de día completo',
-          notificar: false, enviar_correo: false
-        };
-        const resH = await fetch(`${API_URL}/citas`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-        if (resH.ok) horasBloqueadas++;
-      }
-      if (horasBloqueadas === 0) throw new Error("Plan B falló también.");
-      if(!globalBlocked.includes(d)) globalBlocked.push(d);
+       alert("❌ El servidor en Render no tiene la ruta /api/bloquear-dia.\nRevisa el código Node.js que te proporcioné para agregarlo.");
+       return;
     }
 
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
     alert(`✅ El día ${fmtDateShort(d)} ha sido bloqueado correctamente.`);
-  } catch(e) { alert('❌ Error al bloquear día. Revisa la consola o tu conexión.'); }
+  } catch(e) { alert('❌ Error al bloquear día. ¿Está encendido el servidor Render?'); }
 }
 
 async function rmBlk(d) {
   try {
     await fetch(`${API_URL}/bloquear-dia/${d}`, { method: 'DELETE' });
     
-    const bloqueosFalsos = getApts().filter(a => a.date === d && a.nombre === 'BLOQUEADO (Admin)');
-    for (const b of bloqueosFalsos) {
-       await fetch(`${API_URL}/citas/${b.id}`, { method: 'DELETE' });
-    }
-
     globalBlocked = globalBlocked.filter(x => x !== d);
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
@@ -1592,7 +1607,7 @@ async function blockMultipleHours() {
     const payload = {
       nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
       servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo múltiple',
-      notificar: false, enviar_correo: false
+      notificar: false, enviar_correo: false // Instrucción para tu backend Render
     };
     try {
       const res = await fetch(`${API_URL}/citas`, {
