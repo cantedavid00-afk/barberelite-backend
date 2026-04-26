@@ -46,6 +46,18 @@ async function sendTelegram(message) {
   }
 }
 
+// POST /api/login — Validar contraseña de administrador
+app.post('/api/login', (req, res) => {
+  const { password } = req.body;
+  
+  // Comparamos lo que envió el usuario con tu variable de entorno en Render
+  if (password === process.env.ADMIN_PASS) {
+    res.json({ ok: true });
+  } else {
+    res.status(401).json({ error: 'Contraseña incorrecta' });
+  }
+});
+
 // ════════════════════════════════════════
 //  ENDPOINTS — SERVICIOS
 // ════════════════════════════════════════
