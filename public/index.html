@@ -842,7 +842,6 @@
 // ══════════════════════════════════════════════════════
 //  CONFIGURACIÓN GLOBAL – API REAL
 // ══════════════════════════════════════════════════════
-const ADMIN_PASS = 'barberia2025';
 const API_URL = 'https://barberelite-api.onrender.com/api';
 
 let globalApts = [];
@@ -1245,13 +1244,34 @@ function renderFooter(){
 // ══════════════════════════════════════
 function showAdminModal(){document.getElementById('loginModal').classList.add('show');setTimeout(()=>document.getElementById('adminPass').focus(),100);}
 function closeMov(id){document.getElementById(id).classList.remove('show');}
-function doLogin(){
-  if(document.getElementById('adminPass').value===ADMIN_PASS){
-    closeMov('loginModal');document.getElementById('adminPass').value='';
-    document.getElementById('clientPortal').classList.add('hidden');
-    document.getElementById('adminPanel').classList.add('show');
-    initAdmin();
-  }else{document.getElementById('passErr').style.display='block';}
+// ══════════════════════════════════════
+//  ADMIN AUTH MEJORADO Y SEGURO
+// ══════════════════════════════════════
+async function doLogin(){
+  const passInput = document.getElementById('adminPass').value;
+  
+  try {
+    // Le preguntamos al servidor si la contraseña es correcta
+    const response = await fetch(`${API_URL}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passInput })
+    });
+
+    if(response.ok) {
+      // Contraseña correcta
+      closeMov('loginModal');
+      document.getElementById('adminPass').value='';
+      document.getElementById('clientPortal').classList.add('hidden');
+      document.getElementById('adminPanel').classList.add('show');
+      initAdmin();
+    } else {
+      // Contraseña incorrecta
+      document.getElementById('passErr').style.display='block';
+    }
+  } catch(e) {
+    alert("Error conectando con el servidor para validar la contraseña.");
+  }
 }
 function exitAdmin(){
   document.getElementById('adminPanel').classList.remove('show');
