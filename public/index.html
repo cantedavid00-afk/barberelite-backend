@@ -1136,7 +1136,7 @@ function formatSlotSuggestion(date, conflictApt, duration) {
 }
 
 // ══════════════════════════════════════
-//  SUBMIT BOOKING (API) - CON SOLUCION A PAQUETES
+//  SUBMIT BOOKING (API LIMPIA)
 // ══════════════════════════════════════
 async function submitBooking(){
   hideErr();
@@ -1168,30 +1168,10 @@ async function submitBooking(){
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
     
-    // SI HAY ERROR (Por ejemplo, el servicio_id del Paquete no existe en la BD)
     if (!response.ok) {
       const errData = await response.json();
-      const isServiceError = errData.error && errData.error.toLowerCase().includes('servicio');
-      
-      if (isServiceError) {
-        console.warn('ID no encontrado en BD. Aplicando parche (Fallback a ID 1)...');
-        payload.servicio_id = 1; // Usamos el ID 1 como comodín salvavidas
-        payload.comentarios = `[ELEGIDO: ${st.svc.name}] - ` + notes; // Añadimos el nombre al comentario
-        
-        // Reintentamos
-        response = await fetch(`${API_URL}/citas`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-           const errData2 = await response.json();
-           showErr(errData2.error || 'Error al agendar en el servidor.');
-           return;
-        }
-      } else {
-        showErr(errData.error || 'Error al agendar en el servidor.');
-        return;
-      }
+      showErr(errData.error || 'Error al agendar en el servidor.');
+      return;
     }
     
     await loadGlobalData();
@@ -1549,12 +1529,10 @@ async function addBlk() {
   }
   
   try {
-    // INTENTO 1: Usar la ruta de bloquear día original
     let res = await fetch(`${API_URL}/bloquear-dia`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ fecha: d, motivo: 'Admin' })
     });
 
-    // PLAN B: Si la ruta /bloquear-dia falla (porque tu backend no la soporta), bloqueamos cada hora del día
     if (!res.ok) {
       console.warn("Fallo endpoint de bloquear día. Ejecutando PLAN B (Bloquear horas)...");
       let horasBloqueadas = 0;
@@ -1570,8 +1548,6 @@ async function addBlk() {
         if (resH.ok) horasBloqueadas++;
       }
       if (horasBloqueadas === 0) throw new Error("Plan B falló también.");
-      
-      // Añadimos manualmente al frontend para que se vea inmediato
       if(!globalBlocked.includes(d)) globalBlocked.push(d);
     }
 
@@ -1584,18 +1560,14 @@ async function addBlk() {
 
 async function rmBlk(d) {
   try {
-    // 1. Intentamos borrar del endpoint
     await fetch(`${API_URL}/bloquear-dia/${d}`, { method: 'DELETE' });
     
-    // 2. Si usamos el "Plan B", borramos las citas falsas de ese día para liberarlo
     const bloqueosFalsos = getApts().filter(a => a.date === d && a.nombre === 'BLOQUEADO (Admin)');
     for (const b of bloqueosFalsos) {
        await fetch(`${API_URL}/citas/${b.id}`, { method: 'DELETE' });
     }
 
-    // Limpiamos del array temporal
     globalBlocked = globalBlocked.filter(x => x !== d);
-
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
@@ -1702,42 +1674,7 @@ function rCfg(c){
     <div class="fg"><label>WhatsApp</label><input type="tel" id="cfgWa" value="${sc.wa||'2411721407'}" maxlength="10"/></div>
     <div class="fg"><label>Instagram URL</label><input type="text" id="cfgIg" value="${sc.ig||''}"/></div>
     <div class="fg"><label>Facebook URL</label><input type="text" id="cfgFb" value="${sc.fb||''}"/></div>
-  </div><button class="bsm bsm-g" onclick="saveSocial()">Guardar</button></div>
-  
-  <div class="csec" style="margin-top:2.5rem; border-top:1px solid var(--border); padding-top:1.5rem;">
-    <h4 style="color:#ef5350; font-family:var(--fh); margin-bottom:0.5rem; font-size:1.2rem;">⚠️ Zona Peligrosa</h4>
-    <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1.2rem;">Borra de manera permanente todas las reservaciones. Se hará lentamente para no saturar el servidor.</p>
-    <button class="bsm bsm-r" onclick="promptDeleteAll()">🗑 Borrar TODAS las Reservaciones</button>
-  </div>`;
-}
-
-// ══════════════════════════════════════
-//  BORRADO SECUENCIAL (SOLUCIÓN A PROBLEMA 2)
-// ══════════════════════════════════════
-async function promptDeleteAll() {
-  const pass = prompt("Acción Crítica. Ingresa la contraseña de administrador para continuar:");
-  if (pass === null) return; 
-  if (pass !== ADMIN_PASS) { alert("❌ Contraseña incorrecta. Acción denegada."); return; }
-  if (!confirm("⚠️ ATENCIÓN: ¿Estás ABSOLUTAMENTE SEGURO de querer eliminar TODAS las reservaciones?")) return;
-
-  try {
-    alert("⏳ Limpiando base de datos UNA POR UNA. Por favor no cierres la ventana, esto puede tomar unos segundos...");
-    
-    const citasABorrar = getApts();
-    let borradas = 0;
-    
-    // Bucle FOR secuencial en lugar de Promise.all (Evita que Render bloquee la API)
-    for (const a of citasABorrar) {
-      const res = await fetch(`${API_URL}/citas/${a.id}`, { method: 'DELETE' });
-      if(res.ok) borradas++;
-    }
-    
-    await loadGlobalData(); 
-    rCfg(document.getElementById('aContent'));
-    alert(`✅ Terminado. Se eliminaron ${borradas} reservaciones permanentemente.`);
-  } catch(e) {
-    alert("❌ Ocurrió un error de red durante el borrado. Intenta nuevamente.");
-  }
+  </div><button class="bsm bsm-g" onclick="saveSocial()">Guardar</button></div>`;
 }
 
 function saveSocial(){
