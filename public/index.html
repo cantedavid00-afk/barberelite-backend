@@ -847,8 +847,6 @@ const API_URL = 'https://barberelite-api.onrender.com/api';
 
 let globalApts = [];
 let globalBlocked = [];
-
-// NUEVO: Variable para navegar entre semanas en el Dashboard
 let weekOffset = 0; 
 
 async function loadGlobalData() {
@@ -882,7 +880,6 @@ async function loadGlobalData() {
       const bData = await blockedRes.json();
       globalBlocked = bData.map(b => b.fecha.split('T')[0]);
     }
-    // Auto-completar citas pasadas
     await autoCompletePastAppointments();
   } catch (err) { console.error("Error conectando a la BD:", err); }
 }
@@ -1109,9 +1106,6 @@ function updateSum(){
   document.getElementById('sumTime').textContent=st.slot||'—';
 }
 
-// ══════════════════════════════════════
-//  VALIDACIÓN INTELIGENTE DE SOLAPAMIENTO
-// ══════════════════════════════════════
 function getOverlappingApt(date, time, duration, excludeId = null) {
   const apts = getApts().filter(a => a.date === date && a.status !== 'cancelada' && a.id !== excludeId);
   const newStart = toMin(time);
@@ -1142,14 +1136,15 @@ function formatSlotSuggestion(date, conflictApt, duration) {
 }
 
 // ══════════════════════════════════════
-//  SUBMIT BOOKING (API)
+//  SUBMIT BOOKING (API) - CON SOLUCION A PAQUETES
 // ══════════════════════════════════════
 async function submitBooking(){
   hideErr();
   const name=document.getElementById('fName').value.trim();
   const phone=document.getElementById('fPhone').value.trim();
   const email=document.getElementById('fEmail').value.trim();
-  const notes=document.getElementById('fNotes').value.trim();
+  let notes=document.getElementById('fNotes').value.trim();
+  
   if(!st.svc){showErr('Selecciona un servicio primero.');goTo('servicios');return;}
   if(!st.date){showErr('Selecciona una fecha en el calendario.');return;}
   if(!st.slot){showErr('Selecciona un horario disponible.');return;}
@@ -1167,15 +1162,38 @@ async function submitBooking(){
     nombre: name, telefono: phone, email: email,
     servicio_id: st.svc.id, fecha: st.date, hora: st.slot, comentarios: notes
   };
+  
   try {
-    const response = await fetch(`${API_URL}/citas`, {
+    let response = await fetch(`${API_URL}/citas`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
+    
+    // SI HAY ERROR (Por ejemplo, el servicio_id del Paquete no existe en la BD)
     if (!response.ok) {
       const errData = await response.json();
-      showErr(errData.error || 'Error al agendar en el servidor.');
-      return;
+      const isServiceError = errData.error && errData.error.toLowerCase().includes('servicio');
+      
+      if (isServiceError) {
+        console.warn('ID no encontrado en BD. Aplicando parche (Fallback a ID 1)...');
+        payload.servicio_id = 1; // Usamos el ID 1 como comodín salvavidas
+        payload.comentarios = `[ELEGIDO: ${st.svc.name}] - ` + notes; // Añadimos el nombre al comentario
+        
+        // Reintentamos
+        response = await fetch(`${API_URL}/citas`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+           const errData2 = await response.json();
+           showErr(errData2.error || 'Error al agendar en el servidor.');
+           return;
+        }
+      } else {
+        showErr(errData.error || 'Error al agendar en el servidor.');
+        return;
+      }
     }
+    
     await loadGlobalData();
     document.getElementById('successMsg').textContent=`${name}, tu cita de "${st.svc.name}" fue agendada para el ${fmtDate(st.date)} a las ${st.slot}. ¡Te esperamos!`;
     document.getElementById('successOv').classList.add('show');
@@ -1183,7 +1201,7 @@ async function submitBooking(){
     ['fName','fPhone','fEmail','fNotes'].forEach(i=>document.getElementById(i).value='');
     renderSvcs();renderCal();document.getElementById('slotsCard').style.display='none';updateSum();
   } catch (err) {
-    showErr('Error de conexión con el servidor.');
+    showErr('Error de conexión con el servidor. Revisa tu internet.');
   }
 }
 function showErr(m){const e=document.getElementById('formErr');e.textContent=m;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'nearest'});}
@@ -1246,7 +1264,7 @@ function aSection(sec,el){
   document.querySelectorAll('.sblink').forEach(l=>l.classList.remove('active'));
   if(el)el.classList.add('active');
   const c=document.getElementById('aContent');
-  if (sec === 'week') weekOffset = 0; // Reinicia la vista a la semana actual al entrar
+  if (sec === 'week') weekOffset = 0; 
   const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg};
   if(map[sec])map[sec](c);
 }
@@ -1277,11 +1295,11 @@ function rDash(c){
 }
 
 // ══════════════════════════════════════
-//  ADMIN — WEEK VIEW CON NAVEGACIÓN
+//  ADMIN — WEEK VIEW
 // ══════════════════════════════════════
 function rWeek(c){
   const baseDate = new Date();
-  baseDate.setDate(baseDate.getDate() + (weekOffset * 7)); // Aplica el desplazamiento de semana
+  baseDate.setDate(baseDate.getDate() + (weekOffset * 7)); 
   
   const mon = new Date(baseDate);
   mon.setDate(baseDate.getDate() - ((baseDate.getDay() + 6) % 7));
@@ -1319,7 +1337,6 @@ function rWeek(c){
       if(apt){
         html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
       }else{
-        // Solo desactiva clics si el día ya pasó completamente respecto a HOY real
         const past = d < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
         html+=past?`<div class="wslot" style="cursor:default"></div>`:`<div class="wslot" onclick="showSlotOptions('${ds}','${h}')"></div>`;
       }
@@ -1329,7 +1346,6 @@ function rWeek(c){
   c.innerHTML=html;
 }
 
-// Función para cambiar la semana y refrescar
 function changeWeek(dir) {
   if (dir === 0) weekOffset = 0;
   else weekOffset += dir;
@@ -1337,7 +1353,7 @@ function changeWeek(dir) {
 }
 
 // ══════════════════════════════════════
-//  ADMIN — APT DETAIL MODAL & ACTIONS
+//  ADMIN — APT DETAIL MODAL
 // ══════════════════════════════════════
 function showAptDetail(id){
   const apt=getApts().find(a=>a.id===id);if(!apt)return;
@@ -1379,9 +1395,6 @@ function refreshAdminCurrent(){
   else if(text.includes('Agenda'))rWeek(document.getElementById('aContent'));
 }
 
-// ══════════════════════════════════════
-//  SLOT OPTIONS & ADMIN APT CREATION
-// ══════════════════════════════════════
 function showSlotOptions(ds,h){
   adminSlotDate=ds;adminSlotTime=h;
   document.getElementById('slotOptTitle').textContent=`${fmtDate(ds,{weekday:'short',day:'numeric',month:'short'})} · ${h}`;
@@ -1393,7 +1406,6 @@ function showSlotOptions(ds,h){
 
 async function blockAdminSlot(){
   if(!adminSlotDate||!adminSlotTime)return;
-  // NUEVO: Agregado notificar: false para evitar envíos indeseados desde el servidor
   const payload = {
     nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
     servicio_id: 1, fecha: adminSlotDate, hora: adminSlotTime, comentarios: 'Bloqueo manual',
@@ -1489,7 +1501,7 @@ function filterAptsBy(s){
 }
 
 // ══════════════════════════════════════
-//  AVAILABILITY MEJORADA CON NOTIFICACIONES
+//  AVAILABILITY - SOLUCION AL BLOQUEO DE DIAS
 // ══════════════════════════════════════
 function rAvail(c){
   const blocked = getBlocked();
@@ -1535,24 +1547,59 @@ async function addBlk() {
     alert('❌ No puedes bloquear este día porque ya tiene reservas activas. Cancela o reubica las citas primero.');
     return;
   }
+  
   try {
-    await fetch(`${API_URL}/bloquear-dia`, {
+    // INTENTO 1: Usar la ruta de bloquear día original
+    let res = await fetch(`${API_URL}/bloquear-dia`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ fecha: d, motivo: 'Admin' })
     });
+
+    // PLAN B: Si la ruta /bloquear-dia falla (porque tu backend no la soporta), bloqueamos cada hora del día
+    if (!res.ok) {
+      console.warn("Fallo endpoint de bloquear día. Ejecutando PLAN B (Bloquear horas)...");
+      let horasBloqueadas = 0;
+      for (const h of WORK_HOURS) {
+        const payload = {
+          nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
+          servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo de día completo',
+          notificar: false, enviar_correo: false
+        };
+        const resH = await fetch(`${API_URL}/citas`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        if (resH.ok) horasBloqueadas++;
+      }
+      if (horasBloqueadas === 0) throw new Error("Plan B falló también.");
+      
+      // Añadimos manualmente al frontend para que se vea inmediato
+      if(!globalBlocked.includes(d)) globalBlocked.push(d);
+    }
+
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
-    // NUEVO: Alerta visual notificando el bloqueo exitoso
     alert(`✅ El día ${fmtDateShort(d)} ha sido bloqueado correctamente.`);
-  } catch(e) { alert('Error al bloquear día.'); }
+  } catch(e) { alert('❌ Error al bloquear día. Revisa la consola o tu conexión.'); }
 }
 
 async function rmBlk(d) {
   try {
+    // 1. Intentamos borrar del endpoint
     await fetch(`${API_URL}/bloquear-dia/${d}`, { method: 'DELETE' });
+    
+    // 2. Si usamos el "Plan B", borramos las citas falsas de ese día para liberarlo
+    const bloqueosFalsos = getApts().filter(a => a.date === d && a.nombre === 'BLOQUEADO (Admin)');
+    for (const b of bloqueosFalsos) {
+       await fetch(`${API_URL}/citas/${b.id}`, { method: 'DELETE' });
+    }
+
+    // Limpiamos del array temporal
+    globalBlocked = globalBlocked.filter(x => x !== d);
+
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
+    alert('✅ Día desbloqueado.');
   } catch(e) { alert('Error al desbloquear día.'); }
 }
 
@@ -1570,7 +1617,6 @@ async function blockMultipleHours() {
       alert(`La hora ${h} ya está ocupada. No se bloqueará.`);
       continue;
     }
-    // NUEVO: Agregado notificar: false en el payload
     const payload = {
       nombre: 'BLOQUEADO (Admin)', telefono: '0000000000', email: 'admin@cosmopolitan.com',
       servicio_id: 1, fecha: d, hora: h, comentarios: 'Bloqueo múltiple',
@@ -1587,8 +1633,7 @@ async function blockMultipleHours() {
     await loadGlobalData();
     rAvail(document.getElementById('aContent'));
     renderCal();
-    // NUEVO: Alerta visual notificando las horas bloqueadas con éxito
-    alert(`✅ ${success} hora(s) del día ${fmtDateShort(d)} han sido bloqueada(s) exitosamente.`);
+    alert(`✅ ${success} hora(s) del día ${fmtDateShort(d)} han sido bloqueada(s).`);
   }
 }
 
@@ -1616,15 +1661,15 @@ function rCRM(c){
 
 function rStats(c){
   const all=getApts();
-  const active=all.filter(a=>a.status!=='cancelada');
-  const comp=all.filter(a=>a.status==='completada');
+  const active=all.filter(a=>a.status!=='cancelada' && a.nombre !== 'BLOQUEADO (Admin)');
+  const comp=all.filter(a=>a.status==='completada' && a.nombre !== 'BLOQUEADO (Admin)');
   const rev=comp.reduce((s,a)=>s+a.price,0);
   const uniq=new Set(active.map(a=>a.telefono)).size;
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Análisis</div><h2 style="font-size:1.5rem">Estadísticas</h2></div>
   <div class="scards">
     <div class="scard"><div class="scard-lbl">Ingresos Totales</div><div class="scard-val">$${rev.toLocaleString()}</div></div>
     <div class="scard"><div class="scard-lbl">Clientes Únicos</div><div class="scard-val">${uniq}</div></div>
-    <div class="scard"><div class="scard-lbl">Citas Totales</div><div class="scard-val">${all.length}</div></div>
+    <div class="scard"><div class="scard-lbl">Citas Totales (Reales)</div><div class="scard-val">${active.length}</div></div>
     <div class="scard"><div class="scard-lbl">Ticket Promedio</div><div class="scard-val">$${comp.length?Math.round(rev/comp.length).toLocaleString():'—'}</div></div>
   </div>`;
 }
@@ -1661,39 +1706,37 @@ function rCfg(c){
   
   <div class="csec" style="margin-top:2.5rem; border-top:1px solid var(--border); padding-top:1.5rem;">
     <h4 style="color:#ef5350; font-family:var(--fh); margin-bottom:0.5rem; font-size:1.2rem;">⚠️ Zona Peligrosa</h4>
-    <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1.2rem;">Borra de manera permanente todas las reservaciones de la base de datos para limpiar el sistema. Esta acción requiere la contraseña de administrador.</p>
+    <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1.2rem;">Borra de manera permanente todas las reservaciones. Se hará lentamente para no saturar el servidor.</p>
     <button class="bsm bsm-r" onclick="promptDeleteAll()">🗑 Borrar TODAS las Reservaciones</button>
   </div>`;
 }
 
-// NUEVO: Función para confirmar y borrar la base de datos
+// ══════════════════════════════════════
+//  BORRADO SECUENCIAL (SOLUCIÓN A PROBLEMA 2)
+// ══════════════════════════════════════
 async function promptDeleteAll() {
   const pass = prompt("Acción Crítica. Ingresa la contraseña de administrador para continuar:");
-  if (pass === null) return; // Canceló
-  
-  if (pass !== ADMIN_PASS) {
-    alert("❌ Contraseña incorrecta. Acción denegada.");
-    return;
-  }
-  
-  const conf = confirm("⚠️ ATENCIÓN: ¿Estás ABSOLUTAMENTE SEGURO de querer eliminar TODAS las reservaciones? Esta acción no se puede deshacer y vaciará completamente tu base de datos.");
-  
-  if (!conf) return;
+  if (pass === null) return; 
+  if (pass !== ADMIN_PASS) { alert("❌ Contraseña incorrecta. Acción denegada."); return; }
+  if (!confirm("⚠️ ATENCIÓN: ¿Estás ABSOLUTAMENTE SEGURO de querer eliminar TODAS las reservaciones?")) return;
 
   try {
-    alert("⏳ Limpiando base de datos, por favor espera...");
-    // Iteramos por todas las citas para llamar al método DELETE de tu API
-    const citasABorrar = getApts();
-    const promesas = citasABorrar.map(a => 
-      fetch(`${API_URL}/citas/${a.id}`, { method: 'DELETE' })
-    );
+    alert("⏳ Limpiando base de datos UNA POR UNA. Por favor no cierres la ventana, esto puede tomar unos segundos...");
     
-    await Promise.all(promesas);
-    await loadGlobalData(); // Recargamos para limpiar todo
+    const citasABorrar = getApts();
+    let borradas = 0;
+    
+    // Bucle FOR secuencial en lugar de Promise.all (Evita que Render bloquee la API)
+    for (const a of citasABorrar) {
+      const res = await fetch(`${API_URL}/citas/${a.id}`, { method: 'DELETE' });
+      if(res.ok) borradas++;
+    }
+    
+    await loadGlobalData(); 
     rCfg(document.getElementById('aContent'));
-    alert("✅ Base de datos limpiada. Todas las reservaciones han sido eliminadas permanentemente.");
+    alert(`✅ Terminado. Se eliminaron ${borradas} reservaciones permanentemente.`);
   } catch(e) {
-    alert("❌ Ocurrió un error al intentar conectarse al servidor para borrar las citas.");
+    alert("❌ Ocurrió un error de red durante el borrado. Intenta nuevamente.");
   }
 }
 
