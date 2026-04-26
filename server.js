@@ -104,7 +104,8 @@ app.get('/api/disponibilidad', async (req, res) => {
 
 // POST /api/citas  — Crear nueva cita
 app.post('/api/citas', async (req, res) => {
-  const { nombre, telefono, email, servicio_id, fecha, hora, comentarios } = req.body;
+  // Extraemos "notificar" del body para saber si es un bloqueo silencioso del Admin
+  const { nombre, telefono, email, servicio_id, fecha, hora, comentarios, notificar } = req.body;
 
   // Validaciones básicas
   if (!nombre || !telefono || !servicio_id || !fecha || !hora) {
@@ -138,17 +139,20 @@ app.post('/api/citas', async (req, res) => {
     );
 
     // ── NOTIFICACIÓN TELEGRAM AL BARBERO ──────────────────
-    const fechaLegible = new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', {
-      weekday: 'long', day: 'numeric', month: 'long',
-    });
-    const msg = `✂️ <b>¡Nueva Cita!</b>\n\n` +
-      `👤 <b>Cliente:</b> ${nombre}\n` +
-      `📱 <b>Tel:</b> ${telefono}\n` +
-      `💈 <b>Servicio:</b> ${servicio.nombre} ($${servicio.precio} MXN)\n` +
-      `📅 <b>Fecha:</b> ${fechaLegible}\n` +
-      `🕐 <b>Hora:</b> ${hora}\n` +
-      (comentarios ? `📝 <b>Nota:</b> ${comentarios}` : '');
-    await sendTelegram(msg);
+    // SOLO si notificar no es estrictamente "false" enviamos el mensaje
+    if (notificar !== false) {
+      const fechaLegible = new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', {
+        weekday: 'long', day: 'numeric', month: 'long',
+      });
+      const msg = `✂️ <b>¡Nueva Cita!</b>\n\n` +
+        `👤 <b>Cliente:</b> ${nombre}\n` +
+        `📱 <b>Tel:</b> ${telefono}\n` +
+        `💈 <b>Servicio:</b> ${servicio.nombre} ($${servicio.precio} MXN)\n` +
+        `📅 <b>Fecha:</b> ${fechaLegible}\n` +
+        `🕐 <b>Hora:</b> ${hora}\n` +
+        (comentarios ? `📝 <b>Nota:</b> ${comentarios}` : '');
+      await sendTelegram(msg);
+    }
 
     res.status(201).json({ ok: true, cita });
   } catch (err) {
@@ -188,9 +192,30 @@ app.patch('/api/citas/:id/estado', async (req, res) => {
   }
 });
 
+// NUEVO: DELETE /api/citas/:id (Permite borrar citas, necesario para los bloqueos)
+app.delete('/api/citas/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM citas WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ════════════════════════════════════════
 //  ENDPOINTS — ADMIN DISPONIBILIDAD
 // ════════════════════════════════════════
+
+// NUEVO: GET /api/dias-bloqueados (El frontend lo necesita para pintarlos de rojo)
+app.get('/api/dias-bloqueados', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT fecha FROM dias_bloqueados');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/bloquear-dia
 app.post('/api/bloquear-dia', async (req, res) => {
@@ -246,8 +271,6 @@ app.get('/api/clientes', async (req, res) => {
 cron.schedule('*/5 * * * *', async () => {
   try {
     const ahora = new Date();
-    const en1hora = new Date(ahora.getTime() + 60 * 60 * 1000);
-
     // Buscar citas que empiecen entre 55 y 65 minutos en el futuro
     // y que NO hayan recibido recordatorio aún
     const { rows: citas } = await pool.query(
@@ -283,6 +306,7 @@ cron.schedule('*/5 * * * *', async () => {
     console.error('Error cron recordatorio:', err.message);
   }
 });
+
 // ════════════════════════════════════════
 //  CONFIGURACIÓN DEL FRONTEND
 // ════════════════════════════════════════
@@ -294,9 +318,6 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ════════════════════════════════════════
-//  HEALTH CHECK & START
-// ════════════════════════════════════════
 // ════════════════════════════════════════
 //  HEALTH CHECK & START
 // ════════════════════════════════════════
