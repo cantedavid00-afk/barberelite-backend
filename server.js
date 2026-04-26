@@ -23,18 +23,26 @@ const pool = new Pool({
 });
 
 // ─── TELEGRAM HELPER ───────────────────────────────────────
+// ─── TELEGRAM HELPER ACTUALIZADO ───────────────────────────
 async function sendTelegram(message) {
   const TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
-  const CHAT   = process.env.TELEGRAM_CHAT_ID;
-  if (!TOKEN || !CHAT) return;
-  try {
-    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-      chat_id: CHAT,
-      text: message,
-      parse_mode: 'HTML',
-    });
-  } catch (err) {
-    console.error('Error Telegram:', err.message);
+  const CHATS  = process.env.TELEGRAM_CHAT_ID;
+  if (!TOKEN || !CHATS) return;
+
+  // Separamos los IDs por coma y quitamos espacios en blanco por si acaso
+  const chatIds = CHATS.split(',').map(id => id.trim());
+
+  // Enviamos el mensaje a cada ID
+  for (const chatId of chatIds) {
+    try {
+      await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'HTML',
+      });
+    } catch (err) {
+      console.error(`Error Telegram a ${chatId}:`, err.message);
+    }
   }
 }
 
