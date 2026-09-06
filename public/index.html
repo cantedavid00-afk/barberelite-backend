@@ -1878,6 +1878,7 @@ async function rHelp(c){
     <div class="acard"><h4>💬 WhatsApp no envía</h4><p>Si el QR se desconectó o ves <code>Conflict 440</code>, reconecta.</p><button class="bsm bsm-g" onclick="reconnectWA()">🔄 Reconectar WhatsApp (nuevo QR)</button><div id="waHelpBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
     <div class="acard"><h4>⏰ Recordatorios no llegaron</h4><p>Reenvía manualmente los de hoy (solo confirmadas).</p><button class="bsm bsm-g" onclick="resendHoy()">📨 Reenviar recordatorios de hoy</button><div id="resendBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
     <div class="acard"><h4>🔒 Horarios bloqueados por error</h4><p>Restaura horarios 10:00-19:30 Lun-Sáb si se desconfiguró.</p><button class="bsm bsm-r" onclick="resetHorarios()">♻️ Restaurar horarios</button><div id="resetBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
+    <div class="acard"><h4>🧪 Prueba WhatsApp instantánea</h4><p>Envía un mensaje de prueba a cualquier número con WhatsApp real (sin esperar al cron 1h).</p><div style="display:flex;gap:.6rem;flex-wrap:wrap"><input id="waTestPhone" placeholder="2411237222" style="flex:1;min-width:120px;padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream)"/><input id="waTestMsg" placeholder="Mensaje prueba" value="Prueba Cosmopolitan ✅" style="flex:2;min-width:180px;padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream)"/><button class="bsm bsm-g" onclick="sendWATest()">📨 Enviar prueba</button></div><div id="waTestBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
     <div class="acard"><h4>📄 Respaldos</h4><p>Descarga citas y clientes para Excel.</p><div style="display:flex;gap:.6rem"><button class="bsm" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">⬇ Citas CSV</button><button class="bsm" onclick="exportCRM()">⬇ Clientes CSV</button></div></div>
     <div class="acard" style="background:rgba(255,255,255,0.02)"><h4>📚 Guía rápida</h4><ul style="font-size:.82rem;color:var(--muted);line-height:1.7;margin-left:1rem">
       <li><b>WhatsApp QR:</b> Admin > WhatsApp QR > escanear cada 30-60 días o si dice Desconectado.</li>
@@ -1914,6 +1915,17 @@ async function resetHorarios(){
   try{
     await fetch(`${API_URL}/admin/horarios/reset?negocio=barberelite`,{method:'POST'});
     box.textContent='✅ Horarios restaurados';
+  }catch(e){ box.textContent='Error: '+e.message; }
+}
+async function sendWATest(){
+  const tel=document.getElementById('waTestPhone').value.trim();
+  const msg=document.getElementById('waTestMsg').value.trim();
+  const box=document.getElementById('waTestBox');
+  if(!tel) return alert('Pon un número con WhatsApp real');
+  box.textContent='Enviando...';
+  try{
+    const r=await fetch(`${API_URL}/admin/whatsapp/test?negocio=barberelite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefono: tel, mensaje: msg})}).then(x=>x.json());
+    box.innerHTML = r.sent ? `✅ Enviado a ${r.to} — revisa WhatsApp <b>y Render Logs [WA] enviado</b>` : `⚠️ No enviado (ready: ${r.status?.ready}, hasQR: ${r.status?.hasQR}) — revisa QR en WhatsApp QR`;
   }catch(e){ box.textContent='Error: '+e.message; }
 }
 function rShare(c){

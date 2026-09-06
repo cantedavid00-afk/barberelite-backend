@@ -558,11 +558,22 @@ for(const p of ['/admin/horarios/reset','/api/admin/horarios/reset']){
   app.post(p, async (req,res)=>{
     try{
       const nid=await getNegocioId(req);
-      // Restaurar horarios globales desde plantilla (10:00-19:30)
       const horas=['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30'];
       await pool.query('DELETE FROM horarios_trabajo WHERE negocio_id=$1', [nid]);
       for(let d=1; d<=6; d++) for(const h of horas) await pool.query('INSERT INTO horarios_trabajo (negocio_id, dia_semana, hora) VALUES ($1,$2,$3)', [nid,d,h]);
       res.json({ok:true});
+    }catch(e){ res.status(500).json({error:e.message}); }
+  });
+}
+for(const p of ['/admin/whatsapp/test','/api/admin/whatsapp/test']){
+  app.post(p, async (req,res)=>{
+    try{
+      const {telefono, mensaje} = req.body;
+      if(!telefono) return res.status(400).json({error:'telefono requerido'});
+      const text=mensaje||`Prueba Cosmopolitan ✅ ${new Date().toLocaleString('es-MX')} — si ves esto, Baileys está OK`;
+      const ok=await sendWhatsApp(telefono, text);
+      const st=baileys?baileys.getStatus():{ready:false};
+      res.json({ok, sent: ok, status: st, to: telefono});
     }catch(e){ res.status(500).json({error:e.message}); }
   });
 }
