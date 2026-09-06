@@ -458,7 +458,7 @@ cron.schedule('*/5 * * * *', async () => {
     const { rows: citas } = await pool.query(
       `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id FROM citas c JOIN servicios s ON c.servicio_id = s.id
        WHERE c.estado IN ('pendiente','confirmada') AND c.recordatorio_enviado = false
-         AND (c.fecha || ' ' || c.hora)::timestamp BETWEEN NOW() + INTERVAL '55 minutes' AND NOW() + INTERVAL '65 minutes'`
+         AND ((c.fecha || ' ' || c.hora)::timestamp AT TIME ZONE 'America/Mexico_City') BETWEEN NOW() + INTERVAL '55 minutes' AND NOW() + INTERVAL '65 minutes'`
     );
     for (let i=0; i<citas.length; i++) {
       const cita = citas[i];
@@ -523,7 +523,7 @@ for(const p of ['/admin/health','/api/admin/health']){
     try{
       const db = await pool.query('SELECT 1 as ok').then(()=>true).catch(()=>false);
       const wa = baileys ? baileys.getStatus() : {ready:false};
-      const citas = await pool.query("SELECT COUNT(*) as c FROM citas WHERE fecha >= CURRENT_DATE - INTERVAL '1 day'").then(r=>r.rows[0].c).catch(()=>0);
+      const citas = await pool.query("SELECT COUNT(*) as c FROM citas WHERE fecha = (NOW() AT TIME ZONE 'America/Mexico_City')::date").then(r=>r.rows[0].c).catch(()=>0);
       res.json({ db: db?'ok':'error', whatsapp: wa, citas_hoy: parseInt(citas), uptime: process.uptime(), env: process.env.FRONTEND_URL||'*' });
     }catch(e){ res.status(500).json({error:e.message}); }
   });
@@ -542,15 +542,15 @@ for(const p of ['/admin/whatsapp/reconnect','/api/admin/whatsapp/reconnect']){
 for(const p of ['/admin/recordatorios/reenviar','/api/admin/recordatorios/reenviar']){
   app.post(p, async (req,res)=>{
     try{
-      const {rows: citas} = await pool.query(`SELECT c.*, s.nombre as servicio_nombre FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=CURRENT_DATE AND c.estado='confirmada' ORDER BY c.hora LIMIT 10`);
+      const {rows: citas} = await pool.query(`SELECT c.*, s.nombre as servicio_nombre FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=(NOW() AT TIME ZONE 'America/Mexico_City')::date AND c.estado IN ('pendiente','confirmada') ORDER BY c.hora LIMIT 20`);
       let enviados=0;
       for(const cita of citas){
-        const waMsg=`Hola ${cita.nombre}, te recordamos tu cita de ${cita.servicio_nombre} hoy a las ${cita.hora}. ¡Te esperamos!`;
+        const waMsg=`Hola ${cita.nombre} ⏰ Te recordamos tu cita de *${cita.servicio_nombre}* hoy a las ${cita.hora}. ¡Te esperamos en Cosmopolitan!`;
         const ok=await sendWhatsApp(cita.telefono, waMsg);
         if(ok) enviados++;
         await new Promise(r=>setTimeout(r,1500));
       }
-      res.json({ok:true, enviados, total: citas.length});
+      res.json({ok:true, enviados, total: citas.length, detalle: citas.map(c=>`${c.hora} ${c.nombre} ${c.estado}`).join(' | ')});
     }catch(e){ res.status(500).json({error:e.message}); }
   });
 }
