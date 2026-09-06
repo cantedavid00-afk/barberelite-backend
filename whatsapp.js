@@ -54,7 +54,18 @@ async function useSupabaseAuthState(){
   };
 }
 
+let initLock=false;
 async function initWhatsApp(){
+  if(initLock) return; initLock=true;
+  // Evitar conflicto si corres local + Render con misma DB: solo activa Baileys en Render
+  if(process.env.ENABLE_WA === 'false'){
+    console.log('[WA] Deshabilitado por ENABLE_WA=false (local)');
+    initLock=false; return;
+  }
+  if(!process.env.DATABASE_URL){
+    console.log('[WA] No DATABASE_URL');
+    initLock=false; return;
+  }
   try{
     const { default: makeWASocket, DisconnectReason, initAuthCreds, BufferJSON } = await import('@whiskeysockets/baileys');
     // Intentar cargar desde Supabase
@@ -105,10 +116,19 @@ async function initWhatsApp(){
         console.log('[WA] Conectado ✅');
       }
       if(connection==='close'){
-        const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        const code = lastDisconnect?.error?.output?.statusCode;
+        const isConflict = code===440;
+        if(isConflict){
+          console.log('[WA] Conflict 440 — otra instancia con misma sesión (ej: tu PC local + Render). Solo Render debe correr Baileys. Esperando 30s antes de reconectar...');
+          ready=false;
+          // No limpiar creds, solo esperar — evita loop de 3s
+          setTimeout(initWhatsApp, 30000);
+          return;
+        }
+        const shouldReconnect = code !== DisconnectReason.loggedOut;
         console.log('[WA] Desconectado', lastDisconnect?.error, 'reconnect', shouldReconnect);
         ready=false;
-        if(shouldReconnect) setTimeout(initWhatsApp, 3000);
+        if(shouldReconnect) setTimeout(initWhatsApp, 10000);
       }
     });
 
@@ -118,7 +138,7 @@ async function initWhatsApp(){
       await origKeysSet(data);
     };
 
-  }catch(e){ console.error('[WA] init error', e.message); }
+  }catch(e){ console.error('[WA] init error', e.message); } finally { initLock=false; }
 }
 
 function getStatus(){ return { ready, hasQR: !!qrStr }; }
