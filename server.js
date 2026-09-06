@@ -39,27 +39,36 @@ async function getNegocioById(id){
   return rows[0]||null;
 }
 
-// ─── TELEGRAM HELPER ───────────────────────────────────────
+// ─── HELPERS: WhatsApp y Telegram por negocio ─────────────────
+function buildWhatsAppUrl(telefono, mensaje){
+  const clean = String(telefono).replace(/\D/g,'');
+  const num = clean.startsWith('52') ? clean : `52${clean}`;
+  return `https://wa.me/${num}?text=${encodeURIComponent(mensaje)}`;
+}
 async function sendTelegram(message, negocioId){
   const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
   let CHATS = process.env.TELEGRAM_CHAT_ID;
-  // Si el negocio tiene chat propio, usar ese
   if(negocioId){
     try{ const n = await getNegocioById(negocioId); if(n && n.telegram_chat_id) CHATS = n.telegram_chat_id; }catch(_){}
   }
-  if (!TOKEN || !CHATS) return;
+  if (!TOKEN || !CHATS) return false;
   const chatIds = String(CHATS).split(',').map(id => id.trim()).filter(Boolean);
+  let ok=false;
   for (const chatId of chatIds) {
     try {
-      await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        chat_id: chatId,
-        text: message,
-        parse_mode: 'HTML',
-      });
-    } catch (err) {
-      console.error(`Error Telegram a ${chatId}:`, err.message);
-    }
+      await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { chat_id: chatId, text: message, parse_mode: 'HTML' });
+      ok=true;
+    } catch (err) { console.error(`Error Telegram a ${chatId}:`, err.message); }
   }
+  return ok;
+}
+function plantillaNuevaCita(negocio, servicio, datos){
+  const icon = negocio.slug==='club-hipico' ? '🐴' : '✂️';
+  return `${icon} <b>¡Nueva Cita! [${negocio.slug}]</b>\n\n` +
+    `👤 <b>Cliente:</b> ${datos.nombre}\n📱 <b>Tel:</b> ${datos.telefono}\n` +
+    `💈 <b>Servicio:</b> ${servicio.nombre} ($${servicio.precio} MXN)\n` +
+    `📅 <b>Fecha:</b> ${datos.fechaLegible}\n🕐 <b>Hora:</b> ${datos.hora}\n` +
+    (datos.comentarios ? `📝 <b>Nota:</b> ${datos.comentarios}` : '');
 }
 
 // ─── HEALTH CHECK (antes del wildcard) ─────────────────────
@@ -148,34 +157,46 @@ app.post('/api/citas', async (req, res) => {
       [nombre, telefono, email, servicio_id, fecha, hora, comentarios || '', negocioId]
     );
 
+    let telegramOk=false;
     if (notificar !== false) {
       const fechaLegible = new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
       const negocio = await getNegocioById(negocioId);
-      const msg = `✂️ <b>¡Nueva Cita! [${negocio.slug}]</b>\n\n` +
-        `👤 <b>Cliente:</b> ${nombre}\n` +
-        `📱 <b>Tel:</b> ${telefono}\n` +
-        `💈 <b>Servicio:</b> ${servicio.nombre} ($${servicio.precio} MXN)\n` +
-        `📅 <b>Fecha:</b> ${fechaLegible}\n` +
-        `🕐 <b>Hora:</b> ${hora}\n` +
-        (comentarios ? `📝 <b>Nota:</b> ${comentarios}` : '');
-      await sendTelegram(msg, negocioId);
+      const msg = plantillaNuevaCita(negocio, servicio, { nombre, telefono, fechaLegible, hora, comentarios });
+      telegramOk = await sendTelegram(msg, negocioId);
     }
-    res.status(201).json({ ok: true, cita });
+    const waMsg = `Hola ${nombre}, tu cita de ${servicio.nombre} el ${fecha} a las ${hora} está confirmada. ¡Te esperamos!`;
+    const whatsappUrl = buildWhatsAppUrl(telefono, waMsg);
+    res.status(201).json({ ok: true, cita, whatsappUrl, telegramOk });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/citas', async (req, res) => {
-  const { fecha, estado } = req.query;
+  const { fecha, estado, q: search, limit, offset } = req.query;
   try {
     const negocioId = await getNegocioId(req);
     let q = `SELECT c.*, s.nombre AS servicio_nombre, s.precio FROM citas c JOIN servicios s ON c.servicio_id = s.id WHERE c.negocio_id=$1`;
     const vals = [negocioId];
     if (fecha) { vals.push(fecha); q += ` AND c.fecha = $${vals.length}`; }
     if (estado) { vals.push(estado); q += ` AND c.estado = $${vals.length}`; }
+    if (search) { vals.push(`%${search}%`); q += ` AND (c.nombre ILIKE $${vals.length} OR c.telefono ILIKE $${vals.length})`; }
     q += ' ORDER BY c.fecha, c.hora';
+    if(limit){ vals.push(parseInt(limit)); q+=` LIMIT $${vals.length}`; if(offset){ vals.push(parseInt(offset)); q+=` OFFSET $${vals.length}`; } }
     const { rows } = await pool.query(q, vals);
-    res.json(rows);
+    // total para paginación
+    if(limit){
+      const cnt = await pool.query(`SELECT COUNT(*) FROM citas c WHERE c.negocio_id=$1`, [negocioId]);
+      res.json({ rows, total: parseInt(cnt.rows[0].count) });
+    } else res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/export/citas', async (req,res)=>{
+  try{
+    const negocioId = await getNegocioId(req);
+    const { rows } = await pool.query(`SELECT c.nombre, c.telefono, c.email, s.nombre as servicio, c.fecha, c.hora, c.estado FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.negocio_id=$1 ORDER BY c.fecha`, [negocioId]);
+    let csv='Nombre,Telefono,Email,Servicio,Fecha,Hora,Estado\n';
+    rows.forEach(r=> csv+=`"${r.nombre}","${r.telefono}","${r.email||''}","${r.servicio}","${r.fecha.toISOString().split('T')[0]}","${r.hora}","${r.estado}"\n`);
+    res.header('Content-Type','text/csv'); res.attachment(`citas-${negocioId}.csv`); res.send(csv);
+  }catch(e){ res.status(500).json({error:e.message}); }
 });
 
 app.patch('/api/citas/:id/estado', async (req, res) => {
@@ -236,10 +257,13 @@ app.delete('/api/bloquear-dia/:fecha', async (req, res) => {
 app.get('/api/clientes', async (req, res) => {
   try {
     const negocioId = await getNegocioId(req);
-    const { rows } = await pool.query(
-      `SELECT telefono, nombre, email, COUNT(*) AS total_citas, MAX(fecha) AS ultima_visita, STRING_AGG(comentarios, ' | ') AS historial
-       FROM citas WHERE negocio_id=$1 AND estado != 'cancelada' GROUP BY telefono, nombre, email ORDER BY total_citas DESC`, [negocioId]
-    );
+    const { q } = req.query;
+    let sql = `SELECT telefono, nombre, email, COUNT(*) AS total_citas, MAX(fecha) AS ultima_visita, STRING_AGG(comentarios, ' | ') AS historial
+       FROM citas WHERE negocio_id=$1 AND estado != 'cancelada'`;
+    const vals=[negocioId];
+    if(q){ vals.push(`%${q}%`); sql+=` AND (nombre ILIKE $${vals.length} OR telefono ILIKE $${vals.length})`; }
+    sql+=` GROUP BY telefono, nombre, email ORDER BY total_citas DESC`;
+    const { rows } = await pool.query(sql, vals);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -254,9 +278,10 @@ app.get('/api/crm', async (req,res)=>{
 });
 
 // ════════════════════════════════════════
-//  CRON JOB — Recordatorio 1 hora antes
+//  CRON JOBS — Recordatorios 24h y 1h antes
 // ════════════════════════════════════════
 cron.schedule('*/5 * * * *', async () => {
+  // Recordatorio 1 hora antes (55-65 min)
   try {
     const { rows: citas } = await pool.query(
       `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id FROM citas c JOIN servicios s ON c.servicio_id = s.id
@@ -265,13 +290,29 @@ cron.schedule('*/5 * * * *', async () => {
     );
     for (const cita of citas) {
       const fechaLeg = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
-      const msg = `⏰ <b>Recordatorio — En 1 hora</b>\n\n` +
+      const icon = cita.negocio_id===2 ? '🐴' : '✂️';
+      const msg = `⏰ <b>Recordatorio — En 1 hora ${icon}</b>\n\n` +
         `👤 ${cita.nombre}\n📱 ${cita.telefono}\n💈 ${cita.servicio_nombre}\n📅 ${fechaLeg} a las ${cita.hora}\n` +
         (cita.comentarios ? `📝 Nota: ${cita.comentarios}` : '');
       await sendTelegram(msg, cita.negocio_id);
       await pool.query('UPDATE citas SET recordatorio_enviado = true WHERE id = $1', [cita.id]);
     }
-  } catch (err) { console.error('Error cron recordatorio:', err.message); }
+  } catch (err) { console.error('Error cron 1h:', err.message); }
+});
+// Recordatorio 24h antes (corre cada hora)
+cron.schedule('0 * * * *', async () => {
+  try {
+    const { rows: citas } = await pool.query(
+      `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id, n.slug FROM citas c
+       JOIN servicios s ON c.servicio_id=s.id JOIN negocios n ON c.negocio_id=n.id
+       WHERE c.estado='confirmada' AND (c.fecha || ' ' || c.hora)::timestamp BETWEEN NOW() + INTERVAL '23 hours' AND NOW() + INTERVAL '25 hours'`
+    );
+    for(const cita of citas){
+      const fechaLeg = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', {weekday:'long', day:'numeric', month:'long'});
+      const msg = `📅 <b>Recordatorio 24h [${cita.slug}]</b>\n\nHola ${cita.nombre}, te esperamos mañana ${fechaLeg} a las ${cita.hora} para ${cita.servicio_nombre}. ¡No faltes!`;
+      await sendTelegram(msg, cita.negocio_id);
+    }
+  } catch(e){ console.error('Error cron 24h:', e.message); }
 });
 
 // ════════════════════════════════════════

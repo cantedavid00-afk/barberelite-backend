@@ -650,6 +650,10 @@
     <li><a href="#agendar">Agendar</a></li>
   </ul>
   <div style="display:flex;gap:.6rem;align-items:center">
+    <select id="negocioSel" onchange="setNegocio(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--cream);padding:.4rem .8rem;border-radius:50px;font-size:.78rem">
+      <option value="barberelite">💈 BarberElite</option>
+      <option value="club-hipico">🐴 Club Hípico</option>
+    </select>
     <button class="btn-nav-book" onclick="goTo('agendar')">Reservar</button>
     <button class="admin-toggle" onclick="showAdminModal()">Admin</button>
   </div>
@@ -794,7 +798,12 @@
 </div>
 <div class="sov" id="successOv">
   <div class="sbox"><div style="font-size:3.5rem;margin-bottom:1.5rem">✅</div><h3>¡Cita Confirmada!</h3>
-  <p id="successMsg"></p><button class="btn-primary" onclick="document.getElementById('successOv').classList.remove('show')">Perfecto, gracias</button></div>
+  <p id="successMsg"></p>
+  <div id="waBox" style="display:none;margin-bottom:1.2rem">
+    <a id="waLink" href="#" target="_blank" class="social-btn wa" style="display:inline-flex;justify-content:center;width:100%;background:#25d366;color:#fff;border-color:#25d366">📱 Enviar comprobante por WhatsApp</a>
+    <p style="font-size:.75rem;color:var(--muted);margin-top:.6rem">Funciona en Vercel — abre WhatsApp Web/App con el mensaje prellenado.</p>
+  </div>
+  <button class="btn-primary" onclick="document.getElementById('successOv').classList.remove('show')">Perfecto, gracias</button></div>
 </div>
 <div class="mov" id="aptDetailMov">
   <div class="mbox-wide">
@@ -848,12 +857,15 @@ let globalApts = [];
 let globalBlocked = [];
 let weekOffset = 0; 
 
+function getNegocio(){ return localStorage.getItem('negocio_sel') || 'barberelite'; }
+function setNegocio(v){ localStorage.setItem('negocio_sel', v); location.reload(); }
+(function initNegocio(){ const s=getNegocio(); const el=document.getElementById('negocioSel'); if(el) el.value=s; })();
 async function loadGlobalData() {
   try {
-    // Si tu backend no tiene la ruta /dias-bloqueados, ignorará el error gracias al catch interno.
+    const negocio = getNegocio();
     const [aptsRes, blockedRes] = await Promise.all([
-      fetch(`${API_URL}/citas`).catch(() => null),
-      fetch(`${API_URL}/dias-bloqueados`).catch(() => null)
+      fetch(`${API_URL}/citas?negocio=${negocio}`).catch(() => null),
+      fetch(`${API_URL}/dias-bloqueados?negocio=${negocio}`).catch(() => null)
     ]);
     
     if (aptsRes && aptsRes.ok) {
@@ -1190,8 +1202,11 @@ async function submitBooking(){
     servicio_id: st.svc.id, fecha: st.date, hora: st.slot, comentarios: notes
   };
   
+  // Adjuntar negocio al payload (para multi-negocio Vercel -> Render)
+  const negocioSel = localStorage.getItem('negocio_sel') || 'barberelite';
+  payload.negocio = negocioSel;
   try {
-    let response = await fetch(`${API_URL}/citas`, {
+    let response = await fetch(`${API_URL}/citas?negocio=${negocioSel}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
     
@@ -1200,9 +1215,19 @@ async function submitBooking(){
       showErr(errData.error || 'Error al agendar en el servidor.');
       return;
     }
+    const data = await response.json();
     
     await loadGlobalData();
     document.getElementById('successMsg').textContent=`${name}, tu cita de "${st.svc.name}" fue agendada para el ${fmtDate(st.date)} a las ${st.slot}. ¡Te esperamos!`;
+    // WhatsApp fallback — funciona en Vercel porque es solo un link wa.me
+    const waBox = document.getElementById('waBox');
+    const waLink = document.getElementById('waLink');
+    if(data.whatsappUrl){
+      waLink.href = data.whatsappUrl;
+      waBox.style.display='block';
+      // Auto-abrir en móviles (opcional, comentado para no ser intrusivo)
+      // window.open(data.whatsappUrl, '_blank');
+    } else waBox.style.display='none';
     document.getElementById('successOv').classList.add('show');
     st.svc=null;st.date=null;st.slot=null;
     ['fName','fPhone','fEmail','fNotes'].forEach(i=>document.getElementById(i).value='');
