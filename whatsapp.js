@@ -57,7 +57,6 @@ async function useSupabaseAuthState(){
 let initLock=false;
 async function initWhatsApp(){
   if(initLock) return; initLock=true;
-  // Evitar conflicto si corres local + Render con misma DB: solo activa Baileys en Render
   if(process.env.ENABLE_WA === 'false'){
     console.log('[WA] Deshabilitado por ENABLE_WA=false (local)');
     initLock=false; return;
@@ -66,6 +65,16 @@ async function initWhatsApp(){
     console.log('[WA] No DATABASE_URL');
     initLock=false; return;
   }
+  // Lock simple via DB para que solo 1 instancia use Baileys
+  try{
+    await pool.query(`CREATE TABLE IF NOT EXISTS whatsapp_lock (id INT PRIMARY KEY, locked_at TIMESTAMPTZ, instance TEXT)`);
+    const {rows} = await pool.query(`SELECT locked_at, instance FROM whatsapp_lock WHERE id=1`);
+    if(rows.length && rows[0].locked_at && new Date() - new Date(rows[0].locked_at) < 90*1000){
+      console.log('[WA] Otro proceso tiene lock reciente ('+rows[0].instance+'), salto init');
+      initLock=false; return;
+    }
+    await pool.query(`INSERT INTO whatsapp_lock (id, locked_at, instance) VALUES (1, now(), $1) ON CONFLICT (id) DO UPDATE SET locked_at=now(), instance=EXCLUDED.instance`, [process.env.RENDER_INSTANCE_ID||'render']);
+  }catch(e){ console.log('[WA] lock check error', e.message); }
   try{
     const { default: makeWASocket, DisconnectReason, initAuthCreds, BufferJSON } = await import('@whiskeysockets/baileys');
     // Intentar cargar desde Supabase
@@ -114,24 +123,31 @@ async function initWhatsApp(){
       if(connection==='open'){
         ready=true; qrStr=null;
         console.log('[WA] Conectado ✅');
+        // heartbeat para lock
+        setInterval(async()=>{
+          if(ready) await pool.query(`UPDATE whatsapp_lock SET locked_at=now() WHERE id=1`).catch(()=>{});
+        }, 30000);
       }
       if(connection==='close'){
         const code = lastDisconnect?.error?.output?.statusCode;
         const isConflict = code===440;
         if(isConflict){
-          console.log('[WA] Conflict 440 — sesión duplicada. Cerrando socket viejo y esperando 60s. Si persiste, borra whatsapp_auth y re-escanea.');
+          console.log('[WA] Conflict 440 — sesión duplicada. Liberando lock y esperando 60s.');
           ready=false;
+          try{ await pool.query('DELETE FROM whatsapp_lock WHERE id=1'); }catch(e){}
           try{ await sock.logout(); }catch(e){}
           try{ sock.end(true); }catch(e){}
-          sock=null;
-          setTimeout(()=>{ initLock=false; initWhatsApp(); }, 60000);
+          sock=null; initLock=false;
+          setTimeout(initWhatsApp, 60000);
           return;
         }
         const shouldReconnect = code !== DisconnectReason.loggedOut;
         console.log('[WA] Desconectado', lastDisconnect?.error, 'reconnect', shouldReconnect);
         ready=false;
+        try{ await pool.query('DELETE FROM whatsapp_lock WHERE id=1'); }catch(e){}
         try{ sock=null; }catch(e){}
-        if(shouldReconnect) setTimeout(()=>{ initLock=false; initWhatsApp(); }, 10000);
+        initLock=false;
+        if(shouldReconnect) setTimeout(initWhatsApp, 10000);
       }
     });
 
