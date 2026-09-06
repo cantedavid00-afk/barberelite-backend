@@ -70,6 +70,17 @@ function plantillaNuevaCita(negocio, servicio, datos){
     `📅 <b>Fecha:</b> ${datos.fechaLegible}\n🕐 <b>Hora:</b> ${datos.hora}\n` +
     (datos.comentarios ? `📝 <b>Nota:</b> ${datos.comentarios}` : '');
 }
+async function sendWhatsApp(telefono, mensaje){
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneId = process.env.WHATSAPP_PHONE_ID;
+  if(!token || !phoneId || token==='demo') { console.log(`[WA demo] Para ${telefono}: ${mensaje.slice(0,60)}...`); return false; }
+  try{
+    await axios.post(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+      messaging_product:'whatsapp', to: telefono.replace(/\D/g,''), type:'text', text:{ body: mensaje }
+    }, { headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json'} });
+    return true;
+  }catch(e){ console.error('WA error', e.response?.data||e.message); return false; }
+}
 
 // ─── HEALTH CHECK (antes del wildcard) ─────────────────────
 app.get('/health', (_, res) => res.json({ ok: true, ts: new Date() }));
@@ -78,6 +89,54 @@ app.get('/health', (_, res) => res.json({ ok: true, ts: new Date() }));
 app.get('/api/negocios', async (req,res)=>{
   try{ const { rows } = await pool.query('SELECT * FROM negocios WHERE activo=true ORDER BY id'); res.json(rows); }
   catch(e){ res.status(500).json({error:e.message}); }
+});
+
+// ─── CATEGORIAS ──────────────────────────────────────────
+app.get('/api/categorias', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {rows}=await pool.query('SELECT * FROM categorias WHERE negocio_id=$1 ORDER BY nombre', [nid]); res.json(rows);}catch(e){res.status(500).json({error:e.message});}
+});
+app.post('/api/categorias', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {nombre, descripcion, color}=req.body; if(!nombre) return res.status(400).json({error:'Nombre requerido'}); const {rows:[c]}=await pool.query('INSERT INTO categorias (negocio_id,nombre,descripcion,color) VALUES ($1,$2,$3,$4) RETURNING *', [nid,nombre,descripcion||'',color||'#FF2D55']); res.status(201).json(c);}catch(e){res.status(500).json({error:e.message});}
+});
+app.patch('/api/categorias/:id', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {nombre, descripcion, color, activo}=req.body; const {rows:[c]}=await pool.query('UPDATE categorias SET nombre=COALESCE($1,nombre), descripcion=COALESCE($2,descripcion), color=COALESCE($3,color), activo=COALESCE($4,activo) WHERE id=$5 AND negocio_id=$6 RETURNING *', [nombre,descripcion,color,activo,req.params.id,nid]); res.json(c);}catch(e){res.status(500).json({error:e.message});}
+});
+app.delete('/api/categorias/:id', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); await pool.query('DELETE FROM categorias WHERE id=$1 AND negocio_id=$2', [req.params.id,nid]); res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}
+});
+
+// ─── EMPLEADOS ───────────────────────────────────────────
+app.get('/api/empleados', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {rows}=await pool.query(`SELECT e.*, COALESCE(array_agg(c.nombre) FILTER (WHERE c.id IS NOT NULL), '{}') as categorias, COALESCE(array_agg(c.id) FILTER (WHERE c.id IS NOT NULL), '{}') as categoria_ids FROM empleados e LEFT JOIN empleado_categorias ec ON ec.empleado_id=e.id LEFT JOIN categorias c ON c.id=ec.categoria_id WHERE e.negocio_id=$1 GROUP BY e.id ORDER BY e.nombre`, [nid]); res.json(rows);}catch(e){res.status(500).json({error:e.message});}
+});
+app.post('/api/empleados', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {nombre, telefono, especialidad, foto_url, categoria_ids}=req.body; if(!nombre) return res.status(400).json({error:'Nombre requerido'}); const {rows:[emp]}=await pool.query('INSERT INTO empleados (negocio_id,nombre,telefono,especialidad,foto_url) VALUES ($1,$2,$3,$4,$5) RETURNING *', [nid,nombre,telefono||'',especialidad||'',foto_url||'']); if(categoria_ids && categoria_ids.length){ for(const cid of categoria_ids) await pool.query('INSERT INTO empleado_categorias (empleado_id,categoria_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [emp.id, cid]); // clonar horarios globales
+      await pool.query('INSERT INTO empleado_horarios (empleado_id,dia_semana,hora) SELECT $1, dia_semana, hora FROM horarios_trabajo WHERE negocio_id=$2 ON CONFLICT DO NOTHING', [emp.id, nid]); } res.status(201).json(emp);}catch(e){res.status(500).json({error:e.message});}
+});
+app.patch('/api/empleados/:id', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {nombre, telefono, especialidad, activo, categoria_ids}=req.body; await pool.query('UPDATE empleados SET nombre=COALESCE($1,nombre), telefono=COALESCE($2,telefono), especialidad=COALESCE($3,especialidad), activo=COALESCE($4,activo) WHERE id=$5 AND negocio_id=$6', [nombre,telefono,especialidad,activo,req.params.id,nid]); if(categoria_ids!==undefined){ await pool.query('DELETE FROM empleado_categorias WHERE empleado_id=$1', [req.params.id]); for(const cid of categoria_ids) await pool.query('INSERT INTO empleado_categorias VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id,cid]); } const {rows:[emp]}=await pool.query('SELECT * FROM empleados WHERE id=$1', [req.params.id]); res.json(emp);}catch(e){res.status(500).json({error:e.message});}
+});
+app.delete('/api/empleados/:id', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); await pool.query('DELETE FROM empleados WHERE id=$1 AND negocio_id=$2', [req.params.id,nid]); res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}
+});
+app.get('/api/empleados/:id/horarios', async (req,res)=>{
+  try{ const {rows}=await pool.query('SELECT * FROM empleado_horarios WHERE empleado_id=$1 ORDER BY dia_semana, hora', [req.params.id]); res.json(rows);}catch(e){res.status(500).json({error:e.message});}
+});
+app.put('/api/empleados/:id/horarios', async (req,res)=>{
+  try{ const {horarios}=req.body; // [{dia_semana,hora,activo}]
+    await pool.query('DELETE FROM empleado_horarios WHERE empleado_id=$1', [req.params.id]);
+    for(const h of horarios) await pool.query('INSERT INTO empleado_horarios (empleado_id,dia_semana,hora,activo) VALUES ($1,$2,$3,$4)', [req.params.id, h.dia_semana, h.hora, h.activo!==false]);
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+app.get('/api/empleados/:id/dias-bloqueados', async (req,res)=>{
+  try{ const {rows}=await pool.query('SELECT * FROM empleado_dias_bloqueados WHERE empleado_id=$1 ORDER BY fecha', [req.params.id]); res.json(rows);}catch(e){res.status(500).json({error:e.message});}
+});
+app.post('/api/empleados/:id/dias-bloqueados', async (req,res)=>{
+  try{ const {fecha, motivo}=req.body; await pool.query('INSERT INTO empleado_dias_bloqueados (empleado_id,fecha,motivo) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [req.params.id, fecha, motivo||'']); res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}
+});
+app.delete('/api/empleados/:id/dias-bloqueados/:fecha', async (req,res)=>{
+  try{ await pool.query('DELETE FROM empleado_dias_bloqueados WHERE empleado_id=$1 AND fecha=$2', [req.params.id, req.params.fecha]); res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}
 });
 
 // POST /api/login — Validar contraseña de administrador
@@ -97,40 +156,72 @@ app.get('/api/servicios', async (req, res) => {
   try {
     const negocioId = await getNegocioId(req);
     const { rows } = await pool.query(
-      'SELECT * FROM servicios WHERE activo = true AND negocio_id=$1 ORDER BY id', [negocioId]
+      'SELECT s.*, c.nombre as categoria_nombre, c.color as categoria_color FROM servicios s LEFT JOIN categorias c ON c.id=s.categoria_id WHERE s.activo = true AND s.negocio_id=$1 ORDER BY s.id', [negocioId]
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/servicios', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {nombre, descripcion, precio, duracion, icono, categoria_id}=req.body; if(!nombre||!precio) return res.status(400).json({error:'Nombre y precio requeridos'}); const {rows:[s]}=await pool.query('INSERT INTO servicios (negocio_id,nombre,descripcion,precio,duracion,icono,categoria_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [nid,nombre,descripcion||'',precio,duracion||30,icono||'✂️',categoria_id||null]); res.status(201).json(s);}catch(e){res.status(500).json({error:e.message});}
+});
+app.patch('/api/servicios/:id', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); const {nombre, descripcion, precio, duracion, icono, categoria_id, activo}=req.body; const {rows:[s]}=await pool.query('UPDATE servicios SET nombre=COALESCE($1,nombre), descripcion=COALESCE($2,descripcion), precio=COALESCE($3,precio), duracion=COALESCE($4,duracion), icono=COALESCE($5,icono), categoria_id=$6, activo=COALESCE($7,activo) WHERE id=$8 AND negocio_id=$9 RETURNING *', [nombre,descripcion,precio,duracion,icono,categoria_id,activo,req.params.id,nid]); res.json(s);}catch(e){res.status(500).json({error:e.message});}
+});
+app.delete('/api/servicios/:id', async (req,res)=>{
+  try{ const nid=await getNegocioId(req); await pool.query('UPDATE servicios SET activo=false WHERE id=$1 AND negocio_id=$2', [req.params.id,nid]); res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}
 });
 
 // ════════════════════════════════════════
 //  ENDPOINTS — DISPONIBILIDAD
 // ════════════════════════════════════════
 app.get('/api/disponibilidad', async (req, res) => {
-  const { fecha } = req.query;
+  const { fecha, servicio_id, empleado_id } = req.query;
   if (!fecha) return res.status(400).json({ error: 'Falta fecha' });
   try {
     const negocioId = await getNegocioId(req);
-    const bloqueado = await pool.query(
-      'SELECT id FROM dias_bloqueados WHERE fecha = $1 AND negocio_id=$2', [fecha, negocioId]
-    );
+    const bloqueado = await pool.query('SELECT id FROM dias_bloqueados WHERE fecha=$1 AND negocio_id=$2', [fecha, negocioId]);
     if (bloqueado.rows.length > 0) return res.json({ disponible: false, horas: [] });
-
-    // Citas del día con duración exacta del servicio
-    const { rows: reservadas } = await pool.query(
-      `SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada'`, [fecha, negocioId]
-    );
     const toMin = t => { const [h,m]=String(t).split(':').map(Number); return h*60+m; };
-    const { rows: horarios } = await pool.query(
-      `SELECT hora FROM horarios_trabajo WHERE dia_semana=$1 AND negocio_id=$2 AND activo=true ORDER BY hora`,
-      [new Date(fecha + 'T12:00:00').getDay(), negocioId]
-    );
-    const horas = horarios.map(h => {
-      const sm = toMin(h.hora);
-      const ocupado = reservadas.some(r => { const s=toMin(r.hora), e=s+(r.duracion||30); return sm>=s && sm<e; });
-      return { hora: h.hora, disponible: !ocupado };
-    });
-    res.json({ disponible: true, horas });
+    // Si se pide por servicio, filtrar empleados por categoría del servicio
+    let empleados = [];
+    if(servicio_id){
+      const svc = (await pool.query('SELECT categoria_id FROM servicios WHERE id=$1 AND negocio_id=$2', [servicio_id, negocioId])).rows[0];
+      if(svc && svc.categoria_id){
+        const er = await pool.query(`SELECT e.id FROM empleados e JOIN empleado_categorias ec ON ec.empleado_id=e.id WHERE e.negocio_id=$1 AND e.activo=true AND ec.categoria_id=$2`, [negocioId, svc.categoria_id]);
+        empleados = er.rows.map(r=>r.id);
+      } else {
+        const er = await pool.query('SELECT id FROM empleados WHERE negocio_id=$1 AND activo=true', [negocioId]);
+        empleados = er.rows.map(r=>r.id);
+      }
+      if(empleado_id) empleados = empleados.filter(id=>id==empleado_id);
+      if(empleados.length===0) return res.json({ disponible: true, horas: [] });
+    }
+    // Horarios: si hay empleados, usar empleado_horarios, si no global
+    let horarios=[];
+    if(empleados.length>0){
+      // empleados específicos: horas donde al menos un empleado esté activo y no bloqueado ese día
+      const dia = new Date(fecha+'T12:00:00').getDay();
+      const blockedEmps = (await pool.query('SELECT empleado_id FROM empleado_dias_bloqueados WHERE fecha=$1 AND empleado_id = ANY($2)', [fecha, empleados])).rows.map(r=>r.empleado_id);
+      const activos = empleados.filter(id=> !blockedEmps.includes(id));
+      if(activos.length===0) return res.json({ disponible: false, horas: [] });
+      const hr = await pool.query('SELECT DISTINCT hora FROM empleado_horarios WHERE empleado_id = ANY($1) AND dia_semana=$2 AND activo=true ORDER BY hora', [activos, dia]);
+      horarios = hr.rows;
+      // reservadas por empleado
+      const {rows: reservadas} = await pool.query(`SELECT c.hora, s.duracion, c.empleado_id FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada' AND c.empleado_id = ANY($3)`, [fecha, negocioId, activos]);
+      const horas = horarios.map(h=>{
+        const sm=toMin(h.hora);
+        // disponible si existe al menos un empleado libre en ese slot
+        const ocupados = reservadas.filter(r=>{ const s=toMin(r.hora), e=s+(r.duracion||30); return sm>=s && sm<e; }).map(r=>r.empleado_id);
+        const libres = activos.filter(id=> !ocupados.includes(id));
+        return { hora: h.hora, disponible: libres.length>0, empleados_disponibles: libres };
+      });
+      return res.json({ disponible: true, horas });
+    } else {
+      const { rows: reservadas } = await pool.query(`SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada'`, [fecha, negocioId]);
+      const { rows: hrs } = await pool.query(`SELECT hora FROM horarios_trabajo WHERE dia_semana=$1 AND negocio_id=$2 AND activo=true ORDER BY hora`, [new Date(fecha+'T12:00:00').getDay(), negocioId]);
+      const horas = hrs.map(h=>{ const sm=toMin(h.hora); const ocup=reservadas.some(r=>{const s=toMin(r.hora),e=s+(r.duracion||30);return sm>=s&&sm<e;}); return {hora:h.hora, disponible:!ocup}; });
+      return res.json({ disponible: true, horas });
+    }
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -138,7 +229,7 @@ app.get('/api/disponibilidad', async (req, res) => {
 //  ENDPOINTS — CITAS
 // ════════════════════════════════════════
 app.post('/api/citas', async (req, res) => {
-  const { nombre, telefono, email, servicio_id, fecha, hora, comentarios, notificar } = req.body;
+  const { nombre, telefono, email, servicio_id, fecha, hora, comentarios, notificar, empleado_id: reqEmp } = req.body;
   if (!nombre || !telefono || !servicio_id || !fecha || !hora) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
@@ -148,19 +239,46 @@ app.post('/api/citas', async (req, res) => {
       'SELECT * FROM servicios WHERE id = $1 AND negocio_id=$2', [servicio_id, negocioId]
     );
     if (!servicio) return res.status(404).json({ error: 'Servicio no encontrado para este negocio' });
-    // Validación solape con duración exacta
     const toMin = t => { const [h,m]=String(t).split(':').map(Number); return h*60+m; };
     const ns = toMin(hora), ne = ns + (servicio.duracion||30);
-    const { rows: existentes } = await pool.query(
-      `SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada'`, [fecha, negocioId]
-    );
-    const solapa = existentes.some(r=>{ const s=toMin(r.hora), e=s+(r.duracion||30); return ns<e && ne>s; });
-    if(solapa) return res.status(409).json({ error: 'Este horario se solapa con otra cita (duración exacta). Elige otro.' });
+    // Determinar empleado: si viene reqEmp validar, si no auto-asignar disponible por categoría
+    let empleadoId = reqEmp ? parseInt(reqEmp) : null;
+    if(!empleadoId && servicio.categoria_id){
+      // Buscar empleados de esa categoría libres en ese slot
+      const {rows: cand} = await pool.query(`SELECT e.id FROM empleados e JOIN empleado_categorias ec ON ec.empleado_id=e.id WHERE e.negocio_id=$1 AND ec.categoria_id=$2 AND e.activo=true`, [negocioId, servicio.categoria_id]);
+      for(const c of cand){
+        const block = await pool.query('SELECT 1 FROM empleado_dias_bloqueados WHERE empleado_id=$1 AND fecha=$2', [c.id, fecha]);
+        if(block.rows.length) continue;
+        const dia = new Date(fecha+'T12:00:00').getDay();
+        const hor = await pool.query('SELECT 1 FROM empleado_horarios WHERE empleado_id=$1 AND dia_semana=$2 AND hora=$3 AND activo=true', [c.id, dia, hora]);
+        if(!hor.rows.length) continue;
+        const {rows: ex} = await pool.query(`SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.empleado_id=$2 AND c.estado!='cancelada'`, [fecha, c.id]);
+        const ocupado = ex.some(r=>{ const s=toMin(r.hora), e=s+(r.duracion||30); return ns<e && ne>s; });
+        if(!ocupado){ empleadoId=c.id; break; }
+      }
+      // Si no hay empleado específico pero hay empleados, permitir sin asignar (compatibilidad)
+    } else if(empleadoId){
+      // Validar que empleado puede hacer ese servicio y está libre
+      if(servicio.categoria_id){
+        const ok = await pool.query('SELECT 1 FROM empleado_categorias WHERE empleado_id=$1 AND categoria_id=$2', [empleadoId, servicio.categoria_id]);
+        if(!ok.rows.length) return res.status(400).json({error:'Empleado no atiende esa categoría'});
+      }
+      const block = await pool.query('SELECT 1 FROM empleado_dias_bloqueados WHERE empleado_id=$1 AND fecha=$2', [empleadoId, fecha]);
+      if(block.rows.length) return res.status(409).json({error:'Empleado no disponible ese día'});
+      const {rows: ex} = await pool.query(`SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.empleado_id=$2 AND c.estado!='cancelada'`, [fecha, empleadoId]);
+      const ocupado = ex.some(r=>{ const s=toMin(r.hora), e=s+(r.duracion||30); return ns<e && ne>s; });
+      if(ocupado) return res.status(409).json({ error: 'Empleado ocupado en ese horario (duración exacta).' });
+    } else {
+      // Sin empleados: validación global antigua
+      const { rows: existentes } = await pool.query(`SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada' AND c.empleado_id IS NULL`, [fecha, negocioId]);
+      const solapa = existentes.some(r=>{ const s=toMin(r.hora), e=s+(r.duracion||30); return ns<e && ne>s; });
+      if(solapa) return res.status(409).json({ error: 'Este horario se solapa con otra cita (duración exacta). Elige otro.' });
+    }
 
     const { rows: [cita] } = await pool.query(
-      `INSERT INTO citas (nombre, telefono, email, servicio_id, fecha, hora, comentarios, estado, negocio_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8) RETURNING *`,
-      [nombre, telefono, email, servicio_id, fecha, hora, comentarios || '', negocioId]
+      `INSERT INTO citas (nombre, telefono, email, servicio_id, fecha, hora, comentarios, estado, negocio_id, empleado_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8, $9) RETURNING *`,
+      [nombre, telefono, email, servicio_id, fecha, hora, comentarios || '', negocioId, empleadoId]
     );
 
     let telegramOk=false;
@@ -225,6 +343,17 @@ app.delete('/api/citas/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+app.post('/api/citas/:id/comprobante', async (req,res)=>{
+  try{
+    const negocioId=await getNegocioId(req);
+    const {rows:[cita]}=await pool.query('SELECT c.*, s.nombre as servicio_nombre, s.precio FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.id=$1 AND c.negocio_id=$2', [req.params.id, negocioId]);
+    if(!cita) return res.status(404).json({error:'Cita no encontrada'});
+    const waMsg=`✅ *Comprobante — ${cita.servicio_nombre}*\n\nHola ${cita.nombre}, tu cita está confirmada:\n📅 ${cita.fecha.toISOString().split('T')[0]} a las ${cita.hora}\n💈 ${cita.servicio_nombre} $${cita.precio}\n📍 Cosmopolitan Apizaco\n¡Te esperamos!`;
+    const waUrl=buildWhatsAppUrl(cita.telefono, waMsg);
+    const ok = await sendWhatsApp(cita.telefono, waMsg);
+    res.json({ok:true, whatsappUrl: waUrl, sent: ok});
+  }catch(e){ res.status(500).json({error:e.message}); }
+});
 
 // ════════════════════════════════════════
 //  ENDPOINTS — ADMIN DISPONIBILIDAD
@@ -287,7 +416,7 @@ app.get('/api/crm', async (req,res)=>{
 //  CRON JOBS — Recordatorios 24h y 1h antes
 // ════════════════════════════════════════
 cron.schedule('*/5 * * * *', async () => {
-  // Recordatorio 1 hora antes (55-65 min)
+  // Recordatorio 1 hora antes a cliente por WhatsApp + Telegram al negocio
   try {
     const { rows: citas } = await pool.query(
       `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id FROM citas c JOIN servicios s ON c.servicio_id = s.id
@@ -297,10 +426,13 @@ cron.schedule('*/5 * * * *', async () => {
     for (const cita of citas) {
       const fechaLeg = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
       const icon = cita.negocio_id===2 ? '🐴' : '✂️';
-      const msg = `⏰ <b>Recordatorio — En 1 hora ${icon}</b>\n\n` +
+      const msgNegocio = `⏰ <b>Recordatorio — En 1 hora ${icon}</b>\n\n` +
         `👤 ${cita.nombre}\n📱 ${cita.telefono}\n💈 ${cita.servicio_nombre}\n📅 ${fechaLeg} a las ${cita.hora}\n` +
         (cita.comentarios ? `📝 Nota: ${cita.comentarios}` : '');
-      await sendTelegram(msg, cita.negocio_id);
+      await sendTelegram(msgNegocio, cita.negocio_id);
+      // WhatsApp al cliente 1h antes
+      const waMsg = `Hola ${cita.nombre}, te recordamos tu cita de ${cita.servicio_nombre} hoy a las ${cita.hora}. ¡Te esperamos! Responde CONFIRMAR para confirmar.`;
+      await sendWhatsApp(cita.telefono, waMsg);
       await pool.query('UPDATE citas SET recordatorio_enviado = true WHERE id = $1', [cita.id]);
     }
   } catch (err) { console.error('Error cron 1h:', err.message); }

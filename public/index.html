@@ -722,6 +722,7 @@
         <div class="fg"><label>Nombre completo *</label><input type="text" id="fName" placeholder="Escribe tu nombre completo" oninput="valName(this)"/><small id="errName" style="color:#e05050;font-size:.75rem;display:none"></small></div>
         <div class="fg"><label>Teléfono WhatsApp * (10 dígitos)</label><input type="tel" id="fPhone" placeholder="Ej: 2221234567" maxlength="10" oninput="valPhone(this)"/><small id="errPhone" style="color:#e05050;font-size:.75rem;display:none"></small></div>
         <div class="fg"><label>Correo electrónico</label><input type="email" id="fEmail" placeholder="tu@correo.com" oninput="valEmail(this)"/><small id="errEmail" style="color:#e05050;font-size:.75rem;display:none"></small></div>
+        <div class="fg" id="empSelWrap" style="display:none"><label>Profesional (opcional)</label><select id="fEmpleado"><option value="">Asignación automática</option></select><small style="color:var(--muted);font-size:.75rem">Si eliges barbero/estilista, verificamos su disponibilidad exacta</small></div>
         <div class="fg"><label>Comentarios o requerimientos especiales</label><textarea id="fNotes" placeholder="Ej: Quiero el fade bien alto, tengo evento este sábado..."></textarea></div>
         <button class="btn-primary btn-submit" onclick="submitBooking()">Confirmar Reservación →</button>
       </div>
@@ -776,6 +777,9 @@
       <div class="sblink" onclick="aSection('avail',this)"><span class="si">🔒</span>Disponibilidad</div>
       <div class="sblink" onclick="aSection('crm',this)"><span class="si">👤</span>Clientes</div>
       <div class="sblink" onclick="aSection('stats',this)"><span class="si">📈</span>Estadísticas</div>
+      <div class="sblink" onclick="aSection('cats',this)"><span class="si">🏷️</span>Categorías</div>
+      <div class="sblink" onclick="aSection('emps',this)"><span class="si">💈</span>Empleados</div>
+      <div class="sblink" onclick="aSection('svcs',this)"><span class="si">✂️</span>Servicios</div>
       <div class="sbtitle">Herramientas</div>
       <div class="sblink" onclick="aSection('share',this)"><span class="si">🔗</span>Compartir / QR</div>
       <div class="sblink" onclick="aSection('cfg',this)"><span class="si">⚙️</span>Configuración</div>
@@ -1044,9 +1048,19 @@ function renderSvcs() {
     </div>`
   ).join('');
 }
-function pickSvc(id) {
+async function pickSvc(id) {
   st.svc=SVCS.find(s=>s.id===id); st.slot=null;
   renderSvcs(); updateSum();
+  // Cargar empleados para esta categoría
+  try{
+    const cats = await fetch(`${API_URL}/categorias?negocio=barberelite`).then(r=>r.json());
+    const svcCat = st.svc.categoria_id || cats.find(c=>c.nombre==='Barbería')?.id;
+    const emps = await fetch(`${API_URL}/empleados?negocio=barberelite`).then(r=>r.json());
+    const filtered = emps.filter(e=> (e.categoria_ids||[]).includes(svcCat));
+    const sel=document.getElementById('fEmpleado');
+    sel.innerHTML='<option value="">Asignación automática</option>' + filtered.map(e=>`<option value="${e.id}">${e.nombre} - ${e.especialidad||''}</option>`).join('');
+    document.getElementById('empSelWrap').style.display = filtered.length ? 'block' : 'none';
+  }catch(e){}
   if(st.date) renderSlots();
   goTo('agendar');
 }
@@ -1198,9 +1212,10 @@ async function submitBooking(){
     return;
   }
   
+  const empSel = document.getElementById('fEmpleado').value;
   const payload = {
     nombre: name, telefono: phone, email: email,
-    servicio_id: st.svc.id, fecha: st.date, hora: st.slot, comentarios: notes
+    servicio_id: st.svc.id, fecha: st.date, hora: st.slot, comentarios: notes, empleado_id: empSel ? parseInt(empSel) : null
   };
   
   payload.negocio = 'barberelite';
@@ -1218,14 +1233,12 @@ async function submitBooking(){
     
     await loadGlobalData();
     document.getElementById('successMsg').textContent=`${name}, tu cita de "${st.svc.name}" fue agendada para el ${fmtDate(st.date)} a las ${st.slot}. ¡Te esperamos!`;
-    // WhatsApp fallback — funciona en Vercel porque es solo un link wa.me
+    // WhatsApp comprobante solo manual (no auto-open)
     const waBox = document.getElementById('waBox');
     const waLink = document.getElementById('waLink');
     if(data.whatsappUrl){
       waLink.href = data.whatsappUrl;
       waBox.style.display='block';
-      // Auto-abrir WhatsApp (Vercel-safe) tras 800ms
-      setTimeout(()=> window.open(data.whatsappUrl, '_blank'), 800);
     } else waBox.style.display='none';
     document.getElementById('successOv').classList.add('show');
     st.svc=null;st.date=null;st.slot=null;
@@ -1320,7 +1333,7 @@ function aSection(sec,el){
   if(el)el.classList.add('active');
   const c=document.getElementById('aContent');
   if (sec === 'week') weekOffset = 0; 
-  const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg};
+  const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg,cats:rCats,emps:rEmps,svcs:rSvcs};
   if(map[sec])map[sec](c);
 }
 function navToAdminSec(secId, filterStr) {
@@ -1428,6 +1441,7 @@ function showAptDetail(id){
   let acts='';
   if(apt.status==='pendiente') acts=`<button class="abt abt-c" onclick="setAptStatus(${id},'confirmada')">✓ Confirmar</button><button class="abt abt-x" onclick="setAptStatus(${id},'cancelada')">✕ Cancelar</button>`;
   else if(apt.status==='confirmada') acts=`<button class="abt abt-d" onclick="setAptStatus(${id},'completada')">✔ Completada</button><button class="abt abt-x" onclick="setAptStatus(${id},'cancelada')">✕ Cancelar</button>`;
+  acts+=`<button class="abt" style="border-color:#25d366;color:#25d366" onclick="sendComprobante(${id})">📱 WhatsApp Comprobante</button>`;
   document.getElementById('adActions').innerHTML=acts;
   document.getElementById('aptDetailMov').classList.add('show');
 }
@@ -1742,6 +1756,96 @@ function rStats(c){
     <div class="scard"><div class="scard-lbl">Citas Totales (Reales)</div><div class="scard-val">${active.length}</div></div>
     <div class="scard"><div class="scard-lbl">Ticket Promedio</div><div class="scard-val">$${comp.length?Math.round(rev/comp.length).toLocaleString():'—'}</div></div>
   </div>`;
+}
+async function rCats(c){
+  c.innerHTML='<div class="empty-st">Cargando categorías...</div>';
+  const res=await fetch(`${API_URL}/categorias?negocio=barberelite`).then(r=>r.json()).catch(()=>[]);
+  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Gestión</div><h2 style="font-size:1.5rem">Categorías</h2><p style="color:var(--muted);font-size:.85rem">Asigna categorías a barberos/estilistas. Ej: Barbería solo la hace el Barbero.</p></div>
+  <div class="acard" style="margin-bottom:1rem"><h4>➕ Nueva Categoría</h4><div style="display:flex;gap:.6rem;flex-wrap:wrap"><input id="catName" placeholder="Nombre (ej: Barbería)" style="flex:1"/><input id="catColor" type="color" value="#FF2D55" style="width:50px"/><button class="bsm bsm-g" onclick="addCat()">Crear</button></div></div>
+  <div class="atable"><div class="athdr" style="grid-template-columns:1fr 100px 80px"><span>Nombre</span><span>Color</span><span>Acciones</span></div>
+  ${res.map(cat=>`<div class="arow" style="grid-template-columns:1fr 100px 80px"><div><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${cat.color};margin-right:.5rem"></span>${cat.nombre}</div><div>${cat.color}</div><div><button class="abt abt-x" onclick="delCat(${cat.id})">🗑</button></div></div>`).join('') || '<div class="empty-st">Sin categorías</div>'}</div>`;
+}
+async function addCat(){
+  const nombre=document.getElementById('catName').value.trim(); const color=document.getElementById('catColor').value;
+  if(!nombre) return alert('Nombre requerido');
+  await fetch(`${API_URL}/categorias?negocio=barberelite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre,color})});
+  rCats(document.getElementById('aContent'));
+}
+async function delCat(id){ if(!confirm('¿Borrar categoría?'))return; await fetch(`${API_URL}/categorias/${id}?negocio=barberelite`,{method:'DELETE'}); rCats(document.getElementById('aContent')); }
+async function rEmps(c){
+  c.innerHTML='<div class="empty-st">Cargando empleados...</div>';
+  const [emps, cats] = await Promise.all([ fetch(`${API_URL}/empleados?negocio=barberelite`).then(r=>r.json()).catch(()=>[]), fetch(`${API_URL}/categorias?negocio=barberelite`).then(r=>r.json()).catch(()=>[]) ]);
+  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Equipo</div><h2 style="font-size:1.5rem">Empleados (${emps.length})</h2><p style="color:var(--muted);font-size:.85rem">Asigna categorías. Si hay 2 empleados de categorías distintas, el mismo horario permite 2 citas simultáneas.</p></div>
+  <div class="acard" style="margin-bottom:1rem"><h4>➕ Nuevo Empleado</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem"><div class="fg"><label>Nombre *</label><input id="empName" placeholder="Ej: Barbero Juan"/></div><div class="fg"><label>Especialidad</label><input id="empEsp" placeholder="Barbería"/></div></div>
+    <div class="fg"><label>Categorías que atiende</label><div style="display:flex;flex-wrap:wrap;gap:.5rem">${cats.map(cat=>`<label style="display:flex;align-items:center;gap:.3rem;font-size:.82rem"><input type="checkbox" value="${cat.id}" class="empCatChk"/> ${cat.nombre}</label>`).join('')}</div></div>
+    <button class="bsm bsm-g" onclick="addEmp()">Crear Empleado</button>
+  </div>
+  <div class="atable"><div class="athdr" style="grid-template-columns:1fr 1fr 120px"><span>Empleado</span><span>Categorías</span><span>Acciones</span></div>
+  ${emps.map(e=>`<div class="arow" style="grid-template-columns:1fr 1fr 120px"><div><div style="font-weight:600">${e.nombre}</div><div style="font-size:.78rem;color:var(--muted)">${e.especialidad||''}</div></div><div style="font-size:.8rem">${(e.categorias||[]).join(', ')||'<span style="color:var(--muted)">Sin asignar</span>'}</div><div style="display:flex;gap:.3rem"><button class="abt" onclick="manageEmpHor(${e.id},'${e.nombre}')">⏰ Horario</button><button class="abt" onclick="manageEmpDias(${e.id},'${e.nombre}')">📅 Días</button><button class="abt abt-x" onclick="delEmp(${e.id})">🗑</button></div></div>`).join('')}</div>`;
+}
+async function addEmp(){
+  const nombre=document.getElementById('empName').value.trim(); if(!nombre) return alert('Nombre requerido');
+  const especialidad=document.getElementById('empEsp').value.trim();
+  const categoria_ids=[...document.querySelectorAll('.empCatChk:checked')].map(c=>parseInt(c.value));
+  await fetch(`${API_URL}/empleados?negocio=barberelite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre, especialidad, categoria_ids})});
+  rEmps(document.getElementById('aContent'));
+}
+async function delEmp(id){ if(!confirm('¿Borrar empleado?'))return; await fetch(`${API_URL}/empleados/${id}?negocio=barberelite`,{method:'DELETE'}); rEmps(document.getElementById('aContent')); }
+async function manageEmpHor(id, nombre){
+  const horarios=await fetch(`${API_URL}/empleados/${id}/horarios`).then(r=>r.json()).catch(()=>[]);
+  const dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  let html=`<h3>⏰ Horario de ${nombre}</h3><p style="color:var(--muted);font-size:.85rem">Desmarca horas no disponibles. Vacío = hereda global.</p>`;
+  html+=`<div style="max-height:300px;overflow:auto">`;
+  for(let d=0;d<7;d++){
+    html+=`<div style="margin:1rem 0"><strong>${dias[d]}</strong><div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem">`;
+    for(let h of WORK_HOURS){
+      const ex=horarios.find(x=>x.dia_semana===d && x.hora.slice(0,5)===h);
+      const chk=ex ? ex.activo : true;
+      html+=`<label style="font-size:.78rem"><input type="checkbox" data-d="${d}" data-h="${h}" ${chk?'checked':''}/> ${h}</label>`;
+    }
+    html+=`</div></div>`;
+  }
+  html+=`</div><button class="bsm bsm-g" onclick="saveEmpHor(${id})">Guardar Horario</button>`;
+  document.getElementById('adBody').innerHTML=html; document.getElementById('adTitle').textContent='Horario por Empleado'; document.getElementById('aptDetailMov').classList.add('show');
+  window._empHorId=id;
+}
+async function saveEmpHor(id){
+  const checks=[...document.querySelectorAll('[data-d]')].map(c=>({dia_semana:parseInt(c.dataset.d), hora:c.dataset.h+':00', activo:c.checked}));
+  await fetch(`${API_URL}/empleados/${id}/horarios`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({horarios:checks})});
+  closeMov('aptDetailMov'); alert('Horario guardado');
+}
+async function manageEmpDias(id, nombre){
+  const dias=await fetch(`${API_URL}/empleados/${id}/dias-bloqueados`).then(r=>r.json()).catch(()=>[]);
+  let html=`<h3>📅 Días no disponibles - ${nombre}</h3><div style="margin:1rem 0">${dias.map(d=>`<div class="btag" onclick="unblockEmpDia(${id},'${d.fecha.split('T')[0]}')">${d.fecha.split('T')[0]} ✕</div>`).join('') || '<span style="color:var(--muted)">Ninguno</span>'}</div><div style="display:flex;gap:.6rem"><input type="date" id="empBlkDate"/><button class="bsm bsm-r" onclick="blockEmpDia(${id})">Bloquear Día</button></div>`;
+  document.getElementById('adBody').innerHTML=html; document.getElementById('adTitle').textContent='Días libres por empleado'; document.getElementById('aptDetailMov').classList.add('show');
+}
+async function blockEmpDia(id){ const f=document.getElementById('empBlkDate').value; if(!f) return alert('Elige fecha'); await fetch(`${API_URL}/empleados/${id}/dias-bloqueados`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:f})}); manageEmpDias(id,''); }
+async function unblockEmpDia(id, fecha){ await fetch(`${API_URL}/empleados/${id}/dias-bloqueados/${fecha}`,{method:'DELETE'}); manageEmpDias(id,''); }
+async function rSvcs(c){
+  c.innerHTML='<div class="empty-st">Cargando servicios...</div>';
+  const [svcs, cats]=await Promise.all([ fetch(`${API_URL}/servicios?negocio=barberelite`).then(r=>r.json()).catch(()=>[]), fetch(`${API_URL}/categorias?negocio=barberelite`).then(r=>r.json()).catch(()=>[]) ]);
+  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Catálogo</div><h2 style="font-size:1.5rem">Servicios (${svcs.length})</h2></div>
+  <div class="acard" style="margin-bottom:1rem"><h4>➕ Nuevo Servicio</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem"><div class="fg"><label>Nombre *</label><input id="svcName" placeholder="Ej: Corte"/></div><div class="fg"><label>Precio *</label><input id="svcPrice" type="number" placeholder="150"/></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem"><div class="fg"><label>Duración (min)</label><input id="svcDur" type="number" value="30"/></div><div class="fg"><label>Categoría</label><select id="svcCat"><option value="">Sin categoría</option>${cats.map(cat=>`<option value="${cat.id}">${cat.nombre}</option>`).join('')}</select></div></div>
+    <button class="bsm bsm-g" onclick="addSvc()">Crear Servicio</button>
+  </div>
+  <div class="atable"><div class="athdr" style="grid-template-columns:1fr 80px 80px 100px"><span>Servicio</span><span>Precio</span><span>Duración</span><span>Acciones</span></div>
+  ${svcs.map(s=>`<div class="arow" style="grid-template-columns:1fr 80px 80px 100px"><div><div style="font-weight:600">${s.nombre}</div><div style="font-size:.75rem;color:var(--muted)">${s.categoria_nombre||'Sin cat'}</div></div><div>$${s.precio}</div><div>${s.duracion} min</div><div><button class="abt abt-x" onclick="delSvc(${s.id})">🗑</button></div></div>`).join('')}</div>`;
+}
+async function addSvc(){
+  const nombre=document.getElementById('svcName').value.trim(); const precio=parseFloat(document.getElementById('svcPrice').value); const duracion=parseInt(document.getElementById('svcDur').value); const categoria_id=document.getElementById('svcCat').value||null;
+  if(!nombre||!precio) return alert('Nombre y precio requeridos');
+  await fetch(`${API_URL}/servicios?negocio=barberelite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre, precio, duracion, categoria_id: categoria_id?parseInt(categoria_id):null})});
+  rSvcs(document.getElementById('aContent'));
+}
+async function delSvc(id){ if(!confirm('¿Desactivar servicio?'))return; await fetch(`${API_URL}/servicios/${id}?negocio=barberelite`,{method:'DELETE'}); rSvcs(document.getElementById('aContent')); }
+function sendComprobante(id){
+  fetch(`${API_URL}/citas/${id}/comprobante?negocio=barberelite`,{method:'POST'}).then(r=>r.json()).then(d=>{
+    if(d.whatsappUrl) window.open(d.whatsappUrl,'_blank');
+    alert(d.sent ? 'WhatsApp enviado' : 'Link generado: '+d.whatsappUrl);
+  });
 }
 
 function rShare(c){
