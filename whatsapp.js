@@ -165,18 +165,21 @@ function getQR(){ return qrStr; }
 
 async function sendViaBaileys(phone, text){
   if(!sock || !ready) { console.log('[WA] no ready, phone', phone); return false; }
-  const jid = phone.replace(/\D/g,'').replace(/^0+/,'') + '@s.whatsapp.net';
-  // asegurar formato internacional
-  let target = jid;
-  if(!target.startsWith('52')) {
-    const clean=phone.replace(/\D/g,'');
-    target = (clean.startsWith('52')?clean:'52'+clean)+'@s.whatsapp.net';
-  }
   try{
-    await sock.sendMessage(target, { text });
-    console.log('[WA] enviado a', target);
-    return true;
+    const sender = require('./whatsapp-sender');
+    const ok = await sender.enviarTextoAUnNumero(sock, phone, text);
+    if(ok) console.log('[WA] enviado a', phone, 'via sender');
+    return ok;
   }catch(e){ console.error('[WA] send error', e.message); return false; }
 }
+async function sendViaBaileysMulti(phones, text){
+  if(!sock || !ready) { console.log('[WA] no ready'); return 0; }
+  try{
+    const sender = require('./whatsapp-sender');
+    const n = await sender.enviarTextoANumeros(sock, phones, text);
+    console.log(`[WA] enviados ${n}/${phones.length}`);
+    return n;
+  }catch(e){ console.error('[WA] multi error', e.message); return 0; }
+}
 
-module.exports = { initWhatsApp, sendViaBaileys, getStatus, getQR };
+module.exports = { initWhatsApp, sendViaBaileys, sendViaBaileysMulti, getStatus, getQR, getSock: ()=>sock };
