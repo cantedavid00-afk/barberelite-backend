@@ -18,8 +18,23 @@ app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 
 // ─── DB (Supabase PostgreSQL) ──────────────────────────────
+// Fix ENETUNREACH en Render Free (pooler IPv4 + pgbouncer)
+// Si DATABASE_URL es db.xxx.supabase.co:5432 (IPv6) lo convertimos a pooler
+function getPoolerUrl(url){
+  if(!url) return url;
+  // db.XXX.supabase.co:5432 -> aws-0-us-east-1.pooler.supabase.com:6543 + pgbouncer
+  if(url.includes('db.') && url.includes('.supabase.co:5432')){
+    const m=url.match(/postgres(?::([^@]+))?@db\.([^.]+)\.supabase\.co:5432\/postgres/);
+    if(m){
+      const pass=m[1]?`:${m[1]}`:'';
+      const project=m[2];
+      return url.replace(/postgresql:\/\/postgres(?::[^@]+)?@db\.[^.]+\.supabase\.co:5432\/postgres/, `postgresql://postgres.${project}${pass}@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true`);
+    }
+  }
+  return url;
+}
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: getPoolerUrl(process.env.DATABASE_URL),
   ssl: { rejectUnauthorized: false },
 });
 
