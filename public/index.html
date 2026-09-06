@@ -650,10 +650,6 @@
     <li><a href="#agendar">Agendar</a></li>
   </ul>
   <div style="display:flex;gap:.6rem;align-items:center">
-    <select id="negocioSel" onchange="setNegocio(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--cream);padding:.4rem .8rem;border-radius:50px;font-size:.78rem">
-      <option value="barberelite">💈 BarberElite</option>
-      <option value="club-hipico">🐴 Club Hípico</option>
-    </select>
     <button class="btn-nav-book" onclick="goTo('agendar')">Reservar</button>
     <button class="admin-toggle" onclick="showAdminModal()">Admin</button>
   </div>
@@ -857,12 +853,9 @@ let globalApts = [];
 let globalBlocked = [];
 let weekOffset = 0; 
 
-function getNegocio(){ return localStorage.getItem('negocio_sel') || 'barberelite'; }
-function setNegocio(v){ localStorage.setItem('negocio_sel', v); location.reload(); }
-(function initNegocio(){ const s=getNegocio(); const el=document.getElementById('negocioSel'); if(el) el.value=s; })();
 async function loadGlobalData() {
   try {
-    const negocio = getNegocio();
+    const negocio = 'barberelite'; // fijo — DB sigue siendo multi-negocio para futuros proyectos
     const [aptsRes, blockedRes] = await Promise.all([
       fetch(`${API_URL}/citas?negocio=${negocio}`).catch(() => null),
       fetch(`${API_URL}/dias-bloqueados?negocio=${negocio}`).catch(() => null)
@@ -1202,11 +1195,9 @@ async function submitBooking(){
     servicio_id: st.svc.id, fecha: st.date, hora: st.slot, comentarios: notes
   };
   
-  // Adjuntar negocio al payload (para multi-negocio Vercel -> Render)
-  const negocioSel = localStorage.getItem('negocio_sel') || 'barberelite';
-  payload.negocio = negocioSel;
+  payload.negocio = 'barberelite';
   try {
-    let response = await fetch(`${API_URL}/citas?negocio=${negocioSel}`, {
+    let response = await fetch(`${API_URL}/citas?negocio=barberelite`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
     
