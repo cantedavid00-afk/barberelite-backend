@@ -310,6 +310,7 @@
       background: var(--accent); border-radius: 50%;
     }
     .cal-day.fully-booked { background: rgba(255, 45, 85, 0.08); color: #e05070; cursor: not-allowed; }
+    .cal-day.almost-full { background: rgba(255,193,7,0.12); color: #ffb74d; border-color: rgba(255,193,7,0.3); }
 
     .slots-card {
       background: var(--bg2); border: 1px solid var(--border);
@@ -718,9 +719,9 @@
           <div class="sumrow"><span class="sumlbl">Duración</span><span id="sumDur">—</span></div>
           <div class="sumrow"><span class="sumlbl">Total</span><span id="sumPrice">—</span></div>
         </div>
-        <div class="fg"><label>Nombre completo *</label><input type="text" id="fName" placeholder="Escribe tu nombre completo"/></div>
-        <div class="fg"><label>Teléfono WhatsApp * (10 dígitos)</label><input type="tel" id="fPhone" placeholder="Ej: 2221234567" maxlength="10"/></div>
-        <div class="fg"><label>Correo electrónico</label><input type="email" id="fEmail" placeholder="tu@correo.com"/></div>
+        <div class="fg"><label>Nombre completo *</label><input type="text" id="fName" placeholder="Escribe tu nombre completo" oninput="valName(this)"/><small id="errName" style="color:#e05050;font-size:.75rem;display:none"></small></div>
+        <div class="fg"><label>Teléfono WhatsApp * (10 dígitos)</label><input type="tel" id="fPhone" placeholder="Ej: 2221234567" maxlength="10" oninput="valPhone(this)"/><small id="errPhone" style="color:#e05050;font-size:.75rem;display:none"></small></div>
+        <div class="fg"><label>Correo electrónico</label><input type="email" id="fEmail" placeholder="tu@correo.com" oninput="valEmail(this)"/><small id="errEmail" style="color:#e05050;font-size:.75rem;display:none"></small></div>
         <div class="fg"><label>Comentarios o requerimientos especiales</label><textarea id="fNotes" placeholder="Ej: Quiero el fade bien alto, tengo evento este sábado..."></textarea></div>
         <button class="btn-primary btn-submit" onclick="submitBooking()">Confirmar Reservación →</button>
       </div>
@@ -1073,19 +1074,29 @@ function renderCal() {
     const blk=blocked.includes(ds);
     const isToday=d===now.getDate()&&m===now.getMonth()&&y===now.getFullYear();
     const sel=st.date===ds;
-    const hasA=getApts().some(a=>a.date===ds);
-    const avail=!past&&!blk&&WORK_HOURS.some(h=>!isSlotBlocked(ds,h));
-    const full=!past&&!blk&&!avail;
-    
+    const dayApts=getApts().filter(a=>a.date===ds && a.status!=='cancelada');
+    const hasA=dayApts.length>0;
+    const free=WORK_HOURS.filter(h=>!isSlotBlocked(ds,h)).length;
+    const occ = 1 - free/WORK_HOURS.length;
+    let cupo=''; let tip='';
+    if(!past && !blk){
+      if(free===0) cupo=' ● lleno';
+      else if(occ>=0.7) cupo=' ● casi lleno';
+      else if(occ>=0.4) cupo=' ◐ medio';
+      tip = `${free} de ${WORK_HOURS.length} horas libres${hasA?' · '+dayApts.length+' citas':''}`;
+      if(blk) tip='Bloqueado por admin';
+    } else if(blk) tip='Día bloqueado';
+    const avail=!past&&!blk&&free>0;
+    const full=!past&&!blk&&free===0;
     let cls='cal-day';
     if(past||blk||full) cls+=' disabled';
-    if(full || blk) cls+=' fully-booked'; // Si está bloqueado, lo pinta de rojo/inactivo
+    if(full || blk) cls+=' fully-booked';
     if(sel && !blk && !full) cls+=' selected';
     if(isToday) cls+=' today';
     if(hasA&&!past&&!blk) cls+=' has-apts';
-    
+    if(!past && !blk && occ>=0.7 && occ<1) cls+=' almost-full';
     const cl=!past&&!blk&&!full;
-    html+=`<div class="${cls}" ${cl?`onclick="pickDate('${ds}')"`:''}>${d}</div>`;
+    html+=`<div class="${cls}" title="${tip}" ${cl?`onclick="pickDate('${ds}')"`:''}>${d}<span style="font-size:.55rem;display:block;margin-top:-2px;color:var(--muted)">${!past&&!blk?free+' libres':''}</span></div>`;
   }
   document.getElementById('calGrid').innerHTML=html;
 }
@@ -1227,6 +1238,9 @@ async function submitBooking(){
     showErr('Error de conexión con el servidor. Revisa tu internet.');
   }
 }
+function valName(el){ const e=document.getElementById('errName'); if(el.value.trim().length<3){el.classList.add('invalid'); e.textContent='Mínimo 3 caracteres'; e.style.display='block';} else {el.classList.remove('invalid'); e.style.display='none';}}
+function valPhone(el){ const e=document.getElementById('errPhone'); const v=el.value.replace(/\D/g,''); el.value=v; if(v && !/^[0-9]{10}$/.test(v)){el.classList.add('invalid'); e.textContent='Debe ser 10 dígitos'; e.style.display='block';} else {el.classList.remove('invalid'); e.style.display='none'; if(v.length===10) e.style.display='none';}}
+function valEmail(el){ const e=document.getElementById('errEmail'); if(el.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(el.value)){el.classList.add('invalid'); e.textContent='Correo inválido'; e.style.display='block';} else {el.classList.remove('invalid'); e.style.display='none';}}
 function showErr(m){const e=document.getElementById('formErr');e.textContent=m;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function hideErr(){document.getElementById('formErr').style.display='none';}
 
@@ -1535,18 +1549,39 @@ function rAptsTable(apts,acts=false){
   </div>`;
 }
 
+let aptsPage=0; const PAGE_SIZE=10; let aptsFilter='todas'; let aptsSearch='';
 function rApts(c){
   const all=getApts().sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
-  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Gestión</div><h2 style="font-size:1.5rem">Todas las Citas</h2></div>
-  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
-    ${['todas','pendiente','confirmada','completada','cancelada'].map(s=>`<button class="bsm bsm-g" onclick="filterAptsBy('${s}')">${s==='todas'?'Todas':s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Gestión</div><h2 style="font-size:1.5rem">Todas las Citas (${all.length})</h2></div>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+    <input id="aptsSearch" placeholder="Buscar nombre/tel..." style="padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream);font-size:.82rem" oninput="aptsSearch=this.value; aptsPage=0; renderAptsPage()"/>
+    ${['todas','pendiente','confirmada','completada','cancelada'].map(s=>`<button class="bsm bsm-g" onclick="aptsFilter='${s}';aptsPage=0;renderAptsPage()">${s==='todas'?'Todas':s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+    <button class="bsm" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">⬇ CSV</button>
   </div>
-  <div id="aptsContainer">${rAptsTable(all,true)}</div>`;
+  <div id="aptsContainer"></div>
+  <div style="display:flex;gap:.6rem;justify-content:center;margin-top:1rem">
+    <button class="btn-outline" style="padding:.4rem .9rem" onclick="if(aptsPage>0){aptsPage--;renderAptsPage()}">‹ Anterior</button>
+    <span id="aptsPageInfo" style="color:var(--muted);font-size:.82rem;padding:.4rem"></span>
+    <button class="btn-outline" style="padding:.4rem .9rem" onclick="aptsPage++;renderAptsPage()">Siguiente ›</button>
+  </div>`;
+  renderAptsPage();
 }
-function filterAptsBy(s){
-  const all=getApts().sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
-  document.getElementById('aptsContainer').innerHTML=rAptsTable(s==='todas'?all:all.filter(a=>a.status===s),true);
+function getFilteredApts(){
+  let all=getApts().sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
+  if(aptsFilter!=='todas') all=all.filter(a=>a.status===aptsFilter);
+  if(aptsSearch) { const q=aptsSearch.toLowerCase(); all=all.filter(a=> (a.nombre+' '+a.telefono).toLowerCase().includes(q)); }
+  return all;
 }
+function renderAptsPage(){
+  const all=getFilteredApts();
+  const totalPages=Math.max(1, Math.ceil(all.length/PAGE_SIZE));
+  if(aptsPage>=totalPages) aptsPage=totalPages-1;
+  const slice=all.slice(aptsPage*PAGE_SIZE, (aptsPage+1)*PAGE_SIZE);
+  document.getElementById('aptsContainer').innerHTML=rAptsTable(slice,true) + (all.length===0?'<div class="empty-st">Sin resultados</div>':'');
+  const info=document.getElementById('aptsPageInfo');
+  if(info) info.textContent=`Página ${aptsPage+1} de ${totalPages} · ${all.length} citas`;
+}
+function filterAptsBy(s){ aptsFilter=s; aptsPage=0; renderAptsPage(); }
 
 // ══════════════════════════════════════
 //  AVAILABILITY - BLOQUEO DE DIAS Y HORAS
@@ -1670,16 +1705,31 @@ function rCRM(c){
     map[a.telefono].v++;map[a.telefono].sp+=a.price;
     if(a.date>map[a.telefono].last)map[a.telefono].last=a.date;
   });
-  const cls=Object.values(map).sort((a,b)=>b.v-a.v);
-  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">CRM</div><h2 style="font-size:1.5rem">Clientes (${cls.length})</h2></div>
-  ${!cls.length?`<div class="empty-st">Sin clientes.</div>`:`<div class="crm-list">
+  let cls=Object.values(map).sort((a,b)=>b.v-a.v);
+  c.innerHTML=`<div style="margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem"><div><div class="stag">CRM</div><h2 style="font-size:1.5rem">Clientes (${cls.length})</h2></div>
+    <div style="display:flex;gap:.6rem">
+      <input id="crmSearch" placeholder="Buscar nombre/tel..." style="padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream);font-size:.82rem" oninput="filterCRM(this.value)"/>
+      <button class="bsm bsm-g" onclick="exportCRM()">⬇ Export CSV</button>
+      <button class="bsm" style="border:1px solid var(--border)" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">📄 Citas CSV</button>
+    </div>
+  </div>
+  <div id="crmList">${!cls.length?`<div class="empty-st">Sin clientes.</div>`:`<div class="crm-list">
     <div class="crm-hdr"><span>Nombre</span><span>Teléfono</span><span>Visitas</span><span>Gasto</span><span>Última visita</span></div>
-    ${cls.map(cl=>`<div class="crm-row">
+    ${cls.map(cl=>`<div class="crm-row" data-search="${(cl.n+' '+cl.t).toLowerCase()}">
       <div style="font-weight:600">${cl.n}</div><div style="color:var(--muted)">${cl.t}</div>
       <div style="color:var(--accent);font-weight:600">${cl.v}</div><div style="color:#6dbe6d">$${cl.sp.toLocaleString()}</div>
       <div style="font-size:.78rem;color:var(--muted)">${cl.last?fmtDateShort(cl.last):'—'}</div>
     </div>`).join('')}
-  </div>`}`;
+  </div>`}</div>`;
+}
+function filterCRM(q){ const v=q.toLowerCase(); document.querySelectorAll('.crm-row').forEach(r=>{ r.style.display = r.dataset.search.includes(v) ? '' : 'none'; }); }
+function exportCRM(){
+  const rows=[['Nombre','Telefono','Visitas','Gasto','Ultima']];
+  document.querySelectorAll('.crm-row:not([style*=\"display: none\"])').forEach(r=>{
+    const c=r.children; rows.push([c[0].textContent, c[1].textContent, c[2].textContent, c[3].textContent, c[4].textContent]);
+  });
+  let csv=rows.map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clientes-crm.csv'; a.click();
 }
 
 function rStats(c){
