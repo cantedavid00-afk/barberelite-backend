@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════
-//  BarberElite - Backend Node.js + Express
+//  BarberElite - Backend Node.js + Express (Multi-negocio)
 //  Incluye: API REST, Cron Jobs, Notificaciones Telegram
+//  Soporte ?negocio=slug|id (ej: ?negocio=barberelite o ?negocio=2)
 //  Hosting gratis: Render.com
 // ═══════════════════════════════════════════════════════════
 
@@ -19,20 +20,35 @@ app.use(express.json());
 // ─── DB (Supabase PostgreSQL) ──────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // necesario en Supabase/Render
+  ssl: { rejectUnauthorized: false },
 });
 
+// ─── CACHE negocios slug->id ───────────────────────────────
+const negocioCache = new Map();
+async function getNegocioId(req){
+  const raw = req.query.negocio || req.body.negocio || req.params.negocio || 'barberelite';
+  if(/^\d+$/.test(String(raw))) return parseInt(raw,10);
+  if(negocioCache.has(raw)) return negocioCache.get(raw);
+  const { rows } = await pool.query('SELECT id FROM negocios WHERE slug=$1', [raw]);
+  if(!rows.length) throw new Error(`Negocio '${raw}' no encontrado`);
+  negocioCache.set(raw, rows[0].id);
+  return rows[0].id;
+}
+async function getNegocioById(id){
+  const { rows } = await pool.query('SELECT * FROM negocios WHERE id=$1', [id]);
+  return rows[0]||null;
+}
+
 // ─── TELEGRAM HELPER ───────────────────────────────────────
-// ─── TELEGRAM HELPER ACTUALIZADO ───────────────────────────
-async function sendTelegram(message) {
-  const TOKEN  = process.env.TELEGRAM_BOT_TOKEN;
-  const CHATS  = process.env.TELEGRAM_CHAT_ID;
+async function sendTelegram(message, negocioId){
+  const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+  let CHATS = process.env.TELEGRAM_CHAT_ID;
+  // Si el negocio tiene chat propio, usar ese
+  if(negocioId){
+    try{ const n = await getNegocioById(negocioId); if(n && n.telegram_chat_id) CHATS = n.telegram_chat_id; }catch(_){}
+  }
   if (!TOKEN || !CHATS) return;
-
-  // Separamos los IDs por coma y quitamos espacios en blanco por si acaso
-  const chatIds = CHATS.split(',').map(id => id.trim());
-
-  // Enviamos el mensaje a cada ID
+  const chatIds = String(CHATS).split(',').map(id => id.trim()).filter(Boolean);
   for (const chatId of chatIds) {
     try {
       await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
@@ -46,11 +62,18 @@ async function sendTelegram(message) {
   }
 }
 
+// ─── HEALTH CHECK (antes del wildcard) ─────────────────────
+app.get('/health', (_, res) => res.json({ ok: true, ts: new Date() }));
+
+// ─── NEGOCIOS ──────────────────────────────────────────────
+app.get('/api/negocios', async (req,res)=>{
+  try{ const { rows } = await pool.query('SELECT * FROM negocios WHERE activo=true ORDER BY id'); res.json(rows); }
+  catch(e){ res.status(500).json({error:e.message}); }
+});
+
 // POST /api/login — Validar contraseña de administrador
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
-  
-  // Comparamos lo que envió el usuario con tu variable de entorno en Render
   if (password === process.env.ADMIN_PASS) {
     res.json({ ok: true });
   } else {
@@ -61,287 +84,203 @@ app.post('/api/login', (req, res) => {
 // ════════════════════════════════════════
 //  ENDPOINTS — SERVICIOS
 // ════════════════════════════════════════
-
-// GET /api/servicios
 app.get('/api/servicios', async (req, res) => {
   try {
+    const negocioId = await getNegocioId(req);
     const { rows } = await pool.query(
-      'SELECT * FROM servicios WHERE activo = true ORDER BY id'
+      'SELECT * FROM servicios WHERE activo = true AND negocio_id=$1 ORDER BY id', [negocioId]
     );
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ════════════════════════════════════════
 //  ENDPOINTS — DISPONIBILIDAD
 // ════════════════════════════════════════
-
-// GET /api/disponibilidad?fecha=YYYY-MM-DD
 app.get('/api/disponibilidad', async (req, res) => {
   const { fecha } = req.query;
   if (!fecha) return res.status(400).json({ error: 'Falta fecha' });
-
   try {
-    // Verificar si el día está bloqueado
+    const negocioId = await getNegocioId(req);
     const bloqueado = await pool.query(
-      'SELECT id FROM dias_bloqueados WHERE fecha = $1', [fecha]
+      'SELECT id FROM dias_bloqueados WHERE fecha = $1 AND negocio_id=$2', [fecha, negocioId]
     );
-    if (bloqueado.rows.length > 0) {
-      return res.json({ disponible: false, horas: [] });
-    }
+    if (bloqueado.rows.length > 0) return res.json({ disponible: false, horas: [] });
 
-    // Obtener horas ya reservadas ese día
     const reservadas = await pool.query(
-      `SELECT hora FROM citas
-       WHERE fecha = $1 AND estado != 'cancelada'`, [fecha]
+      `SELECT hora FROM citas WHERE fecha = $1 AND negocio_id=$2 AND estado != 'cancelada'`, [fecha, negocioId]
     );
     const horasOcupadas = reservadas.rows.map(r => r.hora);
 
-    // Todas las horas de trabajo
     const { rows: horarios } = await pool.query(
-      `SELECT hora FROM horarios_trabajo
-       WHERE dia_semana = $1 AND activo = true
-       ORDER BY hora`,
-      [new Date(fecha + 'T12:00:00').getDay()]
+      `SELECT hora FROM horarios_trabajo WHERE dia_semana = $1 AND negocio_id=$2 AND activo = true ORDER BY hora`,
+      [new Date(fecha + 'T12:00:00').getDay(), negocioId]
     );
-
-    const horas = horarios.map(h => ({
-      hora: h.hora,
-      disponible: !horasOcupadas.includes(h.hora),
-    }));
-
+    const horas = horarios.map(h => ({ hora: h.hora, disponible: !horasOcupadas.includes(h.hora) }));
     res.json({ disponible: true, horas });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ════════════════════════════════════════
 //  ENDPOINTS — CITAS
 // ════════════════════════════════════════
-
-// POST /api/citas  — Crear nueva cita
 app.post('/api/citas', async (req, res) => {
-  // Extraemos "notificar" del body para saber si es un bloqueo silencioso del Admin
   const { nombre, telefono, email, servicio_id, fecha, hora, comentarios, notificar } = req.body;
-
-  // Validaciones básicas
   if (!nombre || !telefono || !servicio_id || !fecha || !hora) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
-
   try {
-    // Verificar que el slot sigue disponible (race condition)
+    const negocioId = await getNegocioId(req);
     const ocupado = await pool.query(
-      `SELECT id FROM citas
-       WHERE fecha = $1 AND hora = $2 AND estado != 'cancelada'`,
-      [fecha, hora]
+      `SELECT id FROM citas WHERE fecha = $1 AND hora = $2 AND negocio_id=$3 AND estado != 'cancelada'`,
+      [fecha, hora, negocioId]
     );
-    if (ocupado.rows.length > 0) {
-      return res.status(409).json({ error: 'Este horario ya fue reservado. Elige otro.' });
-    }
+    if (ocupado.rows.length > 0) return res.status(409).json({ error: 'Este horario ya fue reservado. Elige otro.' });
 
-    // Obtener datos del servicio
     const { rows: [servicio] } = await pool.query(
-      'SELECT * FROM servicios WHERE id = $1', [servicio_id]
+      'SELECT * FROM servicios WHERE id = $1 AND negocio_id=$2', [servicio_id, negocioId]
     );
-    if (!servicio) return res.status(404).json({ error: 'Servicio no encontrado' });
+    if (!servicio) return res.status(404).json({ error: 'Servicio no encontrado para este negocio' });
 
-    // Insertar cita
     const { rows: [cita] } = await pool.query(
-      `INSERT INTO citas
-         (nombre, telefono, email, servicio_id, fecha, hora, comentarios, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente')
-       RETURNING *`,
-      [nombre, telefono, email, servicio_id, fecha, hora, comentarios || '']
+      `INSERT INTO citas (nombre, telefono, email, servicio_id, fecha, hora, comentarios, estado, negocio_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8) RETURNING *`,
+      [nombre, telefono, email, servicio_id, fecha, hora, comentarios || '', negocioId]
     );
 
-    // ── NOTIFICACIÓN TELEGRAM AL BARBERO ──────────────────
-    // SOLO si notificar no es estrictamente "false" enviamos el mensaje
     if (notificar !== false) {
-      const fechaLegible = new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', {
-        weekday: 'long', day: 'numeric', month: 'long',
-      });
-      const msg = `✂️ <b>¡Nueva Cita!</b>\n\n` +
+      const fechaLegible = new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+      const negocio = await getNegocioById(negocioId);
+      const msg = `✂️ <b>¡Nueva Cita! [${negocio.slug}]</b>\n\n` +
         `👤 <b>Cliente:</b> ${nombre}\n` +
         `📱 <b>Tel:</b> ${telefono}\n` +
         `💈 <b>Servicio:</b> ${servicio.nombre} ($${servicio.precio} MXN)\n` +
         `📅 <b>Fecha:</b> ${fechaLegible}\n` +
         `🕐 <b>Hora:</b> ${hora}\n` +
         (comentarios ? `📝 <b>Nota:</b> ${comentarios}` : '');
-      await sendTelegram(msg);
+      await sendTelegram(msg, negocioId);
     }
-
     res.status(201).json({ ok: true, cita });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/citas?fecha=YYYY-MM-DD
 app.get('/api/citas', async (req, res) => {
   const { fecha, estado } = req.query;
   try {
-    let q = `SELECT c.*, s.nombre AS servicio_nombre, s.precio
-             FROM citas c JOIN servicios s ON c.servicio_id = s.id WHERE 1=1`;
-    const vals = [];
+    const negocioId = await getNegocioId(req);
+    let q = `SELECT c.*, s.nombre AS servicio_nombre, s.precio FROM citas c JOIN servicios s ON c.servicio_id = s.id WHERE c.negocio_id=$1`;
+    const vals = [negocioId];
     if (fecha) { vals.push(fecha); q += ` AND c.fecha = $${vals.length}`; }
     if (estado) { vals.push(estado); q += ` AND c.estado = $${vals.length}`; }
     q += ' ORDER BY c.fecha, c.hora';
     const { rows } = await pool.query(q, vals);
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PATCH /api/citas/:id/estado
 app.patch('/api/citas/:id/estado', async (req, res) => {
-  const { estado } = req.body; // 'confirmada' | 'cancelada' | 'completada'
+  const { estado } = req.body;
   try {
+    const negocioId = await getNegocioId(req);
     const { rows: [cita] } = await pool.query(
-      `UPDATE citas SET estado = $1, updated_at = NOW()
-       WHERE id = $2 RETURNING *`,
-      [estado, req.params.id]
+      `UPDATE citas SET estado = $1, updated_at = NOW() WHERE id = $2 AND negocio_id=$3 RETURNING *`,
+      [estado, req.params.id, negocioId]
     );
+    if(!cita) return res.status(404).json({error:'Cita no encontrada para este negocio'});
     res.json(cita);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// NUEVO: DELETE /api/citas/:id (Permite borrar citas, necesario para los bloqueos)
 app.delete('/api/citas/:id', async (req, res) => {
   try {
-    await pool.query('DELETE FROM citas WHERE id = $1', [req.params.id]);
+    const negocioId = await getNegocioId(req);
+    await pool.query('DELETE FROM citas WHERE id = $1 AND negocio_id=$2', [req.params.id, negocioId]);
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 
 // ════════════════════════════════════════
 //  ENDPOINTS — ADMIN DISPONIBILIDAD
 // ════════════════════════════════════════
-
-// NUEVO: GET /api/dias-bloqueados (El frontend lo necesita para pintarlos de rojo)
 app.get('/api/dias-bloqueados', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT fecha FROM dias_bloqueados');
+    const negocioId = await getNegocioId(req);
+    const { rows } = await pool.query('SELECT fecha FROM dias_bloqueados WHERE negocio_id=$1', [negocioId]);
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/bloquear-dia
 app.post('/api/bloquear-dia', async (req, res) => {
   const { fecha, motivo } = req.body;
   try {
+    const negocioId = await getNegocioId(req);
     await pool.query(
-      'INSERT INTO dias_bloqueados (fecha, motivo) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [fecha, motivo || '']
+      'INSERT INTO dias_bloqueados (fecha, motivo, negocio_id) VALUES ($1, $2, $3) ON CONFLICT (fecha) DO UPDATE SET motivo=EXCLUDED.motivo, negocio_id=EXCLUDED.negocio_id',
+      [fecha, motivo || '', negocioId]
     );
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/bloquear-dia/:fecha
 app.delete('/api/bloquear-dia/:fecha', async (req, res) => {
   try {
-    await pool.query('DELETE FROM dias_bloqueados WHERE fecha = $1', [req.params.fecha]);
+    const negocioId = await getNegocioId(req);
+    await pool.query('DELETE FROM dias_bloqueados WHERE fecha = $1 AND negocio_id=$2', [req.params.fecha, negocioId]);
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ════════════════════════════════════════
 //  ENDPOINTS — CLIENTES (CRM)
 // ════════════════════════════════════════
-
-// GET /api/clientes
 app.get('/api/clientes', async (req, res) => {
   try {
+    const negocioId = await getNegocioId(req);
     const { rows } = await pool.query(
-      `SELECT telefono, nombre, email,
-              COUNT(*) AS total_citas,
-              MAX(fecha) AS ultima_visita,
-              STRING_AGG(comentarios, ' | ') AS historial
-       FROM citas
-       WHERE estado != 'cancelada'
-       GROUP BY telefono, nombre, email
-       ORDER BY total_citas DESC`
+      `SELECT telefono, nombre, email, COUNT(*) AS total_citas, MAX(fecha) AS ultima_visita, STRING_AGG(comentarios, ' | ') AS historial
+       FROM citas WHERE negocio_id=$1 AND estado != 'cancelada' GROUP BY telefono, nombre, email ORDER BY total_citas DESC`, [negocioId]
     );
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Vista CRM agregada
+app.get('/api/crm', async (req,res)=>{
+  try{
+    const negocioId = await getNegocioId(req);
+    const { rows } = await pool.query('SELECT * FROM vista_clientes WHERE negocio_id=$1', [negocioId]);
+    res.json(rows);
+  }catch(e){ res.status(500).json({error:e.message}); }
 });
 
 // ════════════════════════════════════════
 //  CRON JOB — Recordatorio 1 hora antes
 // ════════════════════════════════════════
-// Se ejecuta cada 5 minutos para buscar citas que inicien en ~60 min
 cron.schedule('*/5 * * * *', async () => {
   try {
-    const ahora = new Date();
-    // Buscar citas que empiecen entre 55 y 65 minutos en el futuro
-    // y que NO hayan recibido recordatorio aún
     const { rows: citas } = await pool.query(
-      `SELECT c.*, s.nombre AS servicio_nombre
-       FROM citas c
-       JOIN servicios s ON c.servicio_id = s.id
-       WHERE c.estado = 'confirmada'
-         AND c.recordatorio_enviado = false
-         AND (c.fecha || ' ' || c.hora)::timestamp
-             BETWEEN NOW() + INTERVAL '55 minutes'
-             AND     NOW() + INTERVAL '65 minutes'`
+      `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id FROM citas c JOIN servicios s ON c.servicio_id = s.id
+       WHERE c.estado = 'confirmada' AND c.recordatorio_enviado = false
+         AND (c.fecha || ' ' || c.hora)::timestamp BETWEEN NOW() + INTERVAL '55 minutes' AND NOW() + INTERVAL '65 minutes'`
     );
-
     for (const cita of citas) {
-      const fechaLeg = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', {
-        day: 'numeric', month: 'long',
-      });
+      const fechaLeg = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
       const msg = `⏰ <b>Recordatorio — En 1 hora</b>\n\n` +
-        `👤 ${cita.nombre}\n` +
-        `📱 ${cita.telefono}\n` +
-        `💈 ${cita.servicio_nombre}\n` +
-        `📅 ${fechaLeg} a las ${cita.hora}\n` +
+        `👤 ${cita.nombre}\n📱 ${cita.telefono}\n💈 ${cita.servicio_nombre}\n📅 ${fechaLeg} a las ${cita.hora}\n` +
         (cita.comentarios ? `📝 Nota: ${cita.comentarios}` : '');
-
-      await sendTelegram(msg);
-
-      // Marcar como enviado para no duplicar
-      await pool.query(
-        'UPDATE citas SET recordatorio_enviado = true WHERE id = $1', [cita.id]
-      );
+      await sendTelegram(msg, cita.negocio_id);
+      await pool.query('UPDATE citas SET recordatorio_enviado = true WHERE id = $1', [cita.id]);
     }
-  } catch (err) {
-    console.error('Error cron recordatorio:', err.message);
-  }
+  } catch (err) { console.error('Error cron recordatorio:', err.message); }
 });
 
 // ════════════════════════════════════════
 //  CONFIGURACIÓN DEL FRONTEND
 // ════════════════════════════════════════
-// 1. Le decimos a Express que la carpeta "public" contiene los archivos web
 app.use(express.static(path.join(__dirname, 'public')));
-
-// 2. Cualquier ruta que no sea de la API, mostrará tu index.html
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ════════════════════════════════════════
-//  HEALTH CHECK & START
-// ════════════════════════════════════════
-app.get('/health', (_, res) => res.json({ ok: true, ts: new Date() }));
-
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`✂️  BarberElite API corriendo en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`✂️  BarberElite API (multi-negocio) corriendo en puerto ${PORT}`));
