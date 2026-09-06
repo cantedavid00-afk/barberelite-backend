@@ -782,6 +782,7 @@
       <div class="sblink" onclick="aSection('svcs',this)"><span class="si">✂️</span>Servicios</div>
       <div class="sbtitle">Herramientas</div>
       <div class="sblink" onclick="aSection('wa',this)"><span class="si">💬</span>WhatsApp QR</div>
+      <div class="sblink" onclick="aSection('help',this)"><span class="si">🆘</span>Ayuda Rápida</div>
       <div class="sblink" onclick="aSection('share',this)"><span class="si">🔗</span>Compartir / QR</div>
       <div class="sblink" onclick="aSection('cfg',this)"><span class="si">⚙️</span>Configuración</div>
     </div>
@@ -1334,7 +1335,7 @@ function aSection(sec,el){
   if(el)el.classList.add('active');
   const c=document.getElementById('aContent');
   if (sec === 'week') weekOffset = 0; 
-  const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg,cats:rCats,emps:rEmps,svcs:rSvcs,wa:rWA};
+  const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg,cats:rCats,emps:rEmps,svcs:rSvcs,wa:rWA,help:rHelp};
   if(map[sec])map[sec](c);
 }
 function navToAdminSec(secId, filterStr) {
@@ -1869,6 +1870,51 @@ async function rWA(c){
       </div>`;
     }
   }catch(e){ c.innerHTML=`<div class="empty-st">Error: ${e.message} — verifica que la API esté en https://barberelite-cosmopolitan-api.onrender.com</div>`; }
+}
+async function rHelp(c){
+  c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Soporte</div><h2 style="font-size:1.5rem">Ayuda Rápida — Sin programador</h2><p style="color:var(--muted);font-size:.85rem">Botones para que el administrador solucione solo los problemas más comunes. Todos funcionan sin tocar código.</p></div>
+  <div style="display:grid;gap:1rem">
+    <div class="acard"><h4>🔍 Estado del sistema</h4><p>Verifica DB, WhatsApp y citas. Si algo falla sale en rojo.</p><button class="bsm bsm-g" onclick="checkHealth()">Ver estado</button><div id="healthBox" style="margin-top:.8rem;font-size:.82rem"></div></div>
+    <div class="acard"><h4>💬 WhatsApp no envía</h4><p>Si el QR se desconectó o ves <code>Conflict 440</code>, reconecta.</p><button class="bsm bsm-g" onclick="reconnectWA()">🔄 Reconectar WhatsApp (nuevo QR)</button><div id="waHelpBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
+    <div class="acard"><h4>⏰ Recordatorios no llegaron</h4><p>Reenvía manualmente los de hoy (solo confirmadas).</p><button class="bsm bsm-g" onclick="resendHoy()">📨 Reenviar recordatorios de hoy</button><div id="resendBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
+    <div class="acard"><h4>🔒 Horarios bloqueados por error</h4><p>Restaura horarios 10:00-19:30 Lun-Sáb si se desconfiguró.</p><button class="bsm bsm-r" onclick="resetHorarios()">♻️ Restaurar horarios</button><div id="resetBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
+    <div class="acard"><h4>📄 Respaldos</h4><p>Descarga citas y clientes para Excel.</p><div style="display:flex;gap:.6rem"><button class="bsm" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">⬇ Citas CSV</button><button class="bsm" onclick="exportCRM()">⬇ Clientes CSV</button></div></div>
+    <div class="acard" style="background:rgba(255,255,255,0.02)"><h4>📚 Guía rápida</h4><ul style="font-size:.82rem;color:var(--muted);line-height:1.7;margin-left:1rem">
+      <li><b>WhatsApp QR:</b> Admin > WhatsApp QR > escanear cada 30-60 días o si dice Desconectado.</li>
+      <li><b>No llegan recordatorios:</b> verifica que la cita esté en <i>Confirmada</i> y usa el botón de arriba.</li>
+      <li><b>Día bloqueado sin querer:</b> Admin > Disponibilidad > clic ✕ en el día.</li>
+      <li><b>Render dormido:</b> es normal 30s la primera vez tras 15min sin visitas. UptimeRobot lo evita.</li>
+    </ul></div>
+  </div>`;
+}
+async function checkHealth(){
+  const box=document.getElementById('healthBox'); box.textContent='Consultando...';
+  try{
+    const r=await fetch(`${API_URL}/admin/health?negocio=barberelite`).then(x=>x.json());
+    box.innerHTML=`DB: ${r.db==='ok'?'✅':'❌'} | WhatsApp: ${r.whatsapp.ready?'✅ Conectado':'⚠️ Desconectado'} | Citas: ${r.citas_hoy} | Uptime: ${Math.round(r.uptime/60)}min`;
+  }catch(e){ box.textContent='Error: '+e.message; }
+}
+async function reconnectWA(){
+  const box=document.getElementById('waHelpBox'); box.textContent='Limpiando sesión...';
+  try{
+    await fetch(`${API_URL}/admin/whatsapp/reconnect?negocio=barberelite`,{method:'POST'});
+    box.innerHTML='✅ Sesión limpiada. Ve a <b>WhatsApp QR</b> en 10s y escanea el nuevo QR.';
+  }catch(e){ box.textContent='Error: '+e.message; }
+}
+async function resendHoy(){
+  const box=document.getElementById('resendBox'); box.textContent='Enviando...';
+  try{
+    const r=await fetch(`${API_URL}/admin/recordatorios/reenviar?negocio=barberelite`,{method:'POST'}).then(x=>x.json());
+    box.textContent=`✅ Enviados ${r.enviados} de ${r.total} (hoy)`;
+  }catch(e){ box.textContent='Error: '+e.message; }
+}
+async function resetHorarios(){
+  if(!confirm('¿Restaurar horarios Lun-Sáb 10:00-19:30?')) return;
+  const box=document.getElementById('resetBox'); box.textContent='Restaurando...';
+  try{
+    await fetch(`${API_URL}/admin/horarios/reset?negocio=barberelite`,{method:'POST'});
+    box.textContent='✅ Horarios restaurados';
+  }catch(e){ box.textContent='Error: '+e.message; }
 }
 function rShare(c){
   const url=window.location.href.split('?')[0];

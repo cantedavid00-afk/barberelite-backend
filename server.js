@@ -517,6 +517,56 @@ for(const p of ['/whatsapp/qr-image','/api/whatsapp/qr-image']){
   });
 }
 
+// ─── ADMIN AUTO-AYUDA ───────────────────────────────────
+for(const p of ['/admin/health','/api/admin/health']){
+  app.get(p, async (req,res)=>{
+    try{
+      const db = await pool.query('SELECT 1 as ok').then(()=>true).catch(()=>false);
+      const wa = baileys ? baileys.getStatus() : {ready:false};
+      const citas = await pool.query("SELECT COUNT(*) as c FROM citas WHERE fecha >= CURRENT_DATE - INTERVAL '1 day'").then(r=>r.rows[0].c).catch(()=>0);
+      res.json({ db: db?'ok':'error', whatsapp: wa, citas_hoy: parseInt(citas), uptime: process.uptime(), env: process.env.FRONTEND_URL||'*' });
+    }catch(e){ res.status(500).json({error:e.message}); }
+  });
+}
+for(const p of ['/admin/whatsapp/reconnect','/api/admin/whatsapp/reconnect']){
+  app.post(p, async (req,res)=>{
+    try{
+      await pool.query('DELETE FROM whatsapp_auth'); await pool.query('DELETE FROM whatsapp_lock');
+      if(baileys) { try{ baileys.getStatus().ready=false; }catch(e){} }
+      // Reiniciar Baileys
+      if(baileys) setTimeout(()=> baileys.initWhatsApp(), 1000);
+      res.json({ok:true, msg:'Sesión limpiada, nuevo QR en 10s'});
+    }catch(e){ res.status(500).json({error:e.message}); }
+  });
+}
+for(const p of ['/admin/recordatorios/reenviar','/api/admin/recordatorios/reenviar']){
+  app.post(p, async (req,res)=>{
+    try{
+      const {rows: citas} = await pool.query(`SELECT c.*, s.nombre as servicio_nombre FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=CURRENT_DATE AND c.estado='confirmada' ORDER BY c.hora LIMIT 10`);
+      let enviados=0;
+      for(const cita of citas){
+        const waMsg=`Hola ${cita.nombre}, te recordamos tu cita de ${cita.servicio_nombre} hoy a las ${cita.hora}. ¡Te esperamos!`;
+        const ok=await sendWhatsApp(cita.telefono, waMsg);
+        if(ok) enviados++;
+        await new Promise(r=>setTimeout(r,1500));
+      }
+      res.json({ok:true, enviados, total: citas.length});
+    }catch(e){ res.status(500).json({error:e.message}); }
+  });
+}
+for(const p of ['/admin/horarios/reset','/api/admin/horarios/reset']){
+  app.post(p, async (req,res)=>{
+    try{
+      const nid=await getNegocioId(req);
+      // Restaurar horarios globales desde plantilla (10:00-19:30)
+      const horas=['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30'];
+      await pool.query('DELETE FROM horarios_trabajo WHERE negocio_id=$1', [nid]);
+      for(let d=1; d<=6; d++) for(const h of horas) await pool.query('INSERT INTO horarios_trabajo (negocio_id, dia_semana, hora) VALUES ($1,$2,$3)', [nid,d,h]);
+      res.json({ok:true});
+    }catch(e){ res.status(500).json({error:e.message}); }
+  });
+}
+
 // Inicializar Baileys (no bloquea el arranque)
 if(baileys) baileys.initWhatsApp().catch(e=>console.error('[WA] init fail', e.message));
 
