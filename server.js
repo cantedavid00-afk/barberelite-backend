@@ -70,7 +70,16 @@ function plantillaNuevaCita(negocio, servicio, datos){
     `📅 <b>Fecha:</b> ${datos.fechaLegible}\n🕐 <b>Hora:</b> ${datos.hora}\n` +
     (datos.comentarios ? `📝 <b>Nota:</b> ${datos.comentarios}` : '');
 }
+let baileys=null;
+try{ baileys=require('./whatsapp'); }catch(e){ console.log('[WA] Baileys no cargado', e.message); }
 async function sendWhatsApp(telefono, mensaje){
+  // 0) Baileys (prioridad si está conectado) — gratis, sin Meta, a cualquier cliente
+  if(baileys){
+    try{
+      const ok = await baileys.sendViaBaileys(telefono, mensaje);
+      if(ok) return true;
+    }catch(e){}
+  }
   const clean = String(telefono).replace(/\D/g,'');
   const num = clean.startsWith('52') ? clean : `52${clean}`;
   // 1) Meta Cloud API si está configurado
@@ -469,6 +478,27 @@ cron.schedule('0 * * * *', async () => {
     }
   } catch(e){ console.error('Error cron 24h:', e.message); }
 });
+
+// ─── WHATSAPP BAILEYS ENDPOINTS ───────────────────────
+app.get('/whatsapp/status', (req,res)=> res.json(baileys ? baileys.getStatus() : {ready:false}));
+app.get('/whatsapp/qr', (req,res)=>{
+  if(!baileys) return res.status(500).send('Baileys no inicializado');
+  const qr=baileys.getQR();
+  if(!qr) return res.json({qr:null, ready: baileys.getStatus().ready});
+  // devolver QR como texto para que el admin lo escanee
+  res.json({qr, ready:false});
+});
+app.get('/whatsapp/qr-image', async (req,res)=>{
+  if(!baileys || !baileys.getQR()) return res.status(404).send('QR no disponible');
+  try{
+    const QR=require('qrcode');
+    const png=await QR.toBuffer(baileys.getQR());
+    res.type('png').send(png);
+  }catch(e){ res.status(500).send(e.message); }
+});
+
+// Inicializar Baileys (no bloquea el arranque)
+if(baileys) baileys.initWhatsApp().catch(e=>console.error('[WA] init fail', e.message));
 
 // ════════════════════════════════════════
 //  CONFIGURACIÓN DEL FRONTEND
