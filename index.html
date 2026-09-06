@@ -1852,7 +1852,10 @@ function sendComprobante(id){
 async function rWA(c){
   c.innerHTML='<div class="empty-st">Cargando WhatsApp...</div>';
   try{
-    const st=await fetch(`${API_URL}/whatsapp/status`).then(r=>r.json());
+    const res=await fetch(`${API_URL}/whatsapp/status`);
+    const txt=await res.text();
+    let st;
+    try{ st=JSON.parse(txt); }catch(e){ throw new Error(`API aún desplegando (status ${res.status}): ${txt.slice(0,120)}`); }
     if(st.ready){
       c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">WhatsApp</div><h2 style="font-size:1.5rem">✅ Conectado</h2><p style="color:var(--muted)">Tu número ya está vinculado. Los recordatorios 1h se envían automático a clientes.</p></div>
       <div class="acard"><h4>Estado</h4><p style="color:#6dbe6d">● Conectado — Baileys listo</p><button class="bsm" onclick="rWA(document.getElementById('aContent'))">🔄 Verificar</button></div>`;
