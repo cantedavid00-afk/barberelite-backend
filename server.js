@@ -441,24 +441,38 @@ app.get('/api/crm', async (req,res)=>{
 // ════════════════════════════════════════
 //  CRON JOBS — Recordatorios 24h y 1h antes
 // ════════════════════════════════════════
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+const waTemplatesConfirm = [
+  (n,s,h,f) => `Hola ${n} ✅ Tu cita de *${s}* está confirmada para ${f} a las ${h}. ¡Te esperamos en Cosmopolitan!`,
+  (n,s,h,f) => `¡Gracias ${n}! 🙌 Reserva confirmada: *${s}* el ${f} ${h}. Responde *CONFIRMAR* si todo bien.`,
+  (n,s,h,f) => `Hola ${n}, te confirmamos tu servicio *${s}* para ${f} a las ${h}. ¡Nos vemos pronto! ✂️`
+];
+const waTemplatesRecordatorio = [
+  (n,s,h) => `Hola ${n} ⏰ Te recordamos tu cita de *${s}* hoy a las ${h}. ¡Te esperamos! Responde *CONFIRMAR* para confirmar.`,
+  (n,s,h) => `¡Hola ${n}! Mañana tienes *${s}* a las ${h}. ¿Nos confirmas? 😊`,
+  (n,s,h) => `Recordatorio ${n}: tu *${s}* es hoy ${h}. ¡No faltes! Cosmopolitan te espera.`
+];
 cron.schedule('*/5 * * * *', async () => {
-  // Recordatorio 1 hora antes a cliente por WhatsApp + Telegram al negocio
+  // Recordatorio 1 hora antes a cliente por WhatsApp + Telegram al negocio (pendiente y confirmada)
   try {
     const { rows: citas } = await pool.query(
       `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id FROM citas c JOIN servicios s ON c.servicio_id = s.id
-       WHERE c.estado = 'confirmada' AND c.recordatorio_enviado = false
+       WHERE c.estado IN ('pendiente','confirmada') AND c.recordatorio_enviado = false
          AND (c.fecha || ' ' || c.hora)::timestamp BETWEEN NOW() + INTERVAL '55 minutes' AND NOW() + INTERVAL '65 minutes'`
     );
-    for (const cita of citas) {
+    for (let i=0; i<citas.length; i++) {
+      const cita = citas[i];
       const fechaLeg = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
       const icon = cita.negocio_id===2 ? '🐴' : '✂️';
       const msgNegocio = `⏰ <b>Recordatorio — En 1 hora ${icon}</b>\n\n` +
         `👤 ${cita.nombre}\n📱 ${cita.telefono}\n💈 ${cita.servicio_nombre}\n📅 ${fechaLeg} a las ${cita.hora}\n` +
         (cita.comentarios ? `📝 Nota: ${cita.comentarios}` : '');
       await sendTelegram(msgNegocio, cita.negocio_id);
-      // WhatsApp al cliente 1h antes
-      const waMsg = `Hola ${cita.nombre}, te recordamos tu cita de ${cita.servicio_nombre} hoy a las ${cita.hora}. ¡Te esperamos! Responde CONFIRMAR para confirmar.`;
+      // WhatsApp al cliente 1h antes — mensaje variado + delay anti-ban
+      const tpl = waTemplatesRecordatorio[Math.floor(Math.random()*waTemplatesRecordatorio.length)];
+      const waMsg = tpl(cita.nombre, cita.servicio_nombre, cita.hora);
       await sendWhatsApp(cita.telefono, waMsg);
+      if(i < citas.length-1) await sleep(3000 + Math.floor(Math.random()*2000)); // 3-5s entre envíos
       await pool.query('UPDATE citas SET recordatorio_enviado = true WHERE id = $1', [cita.id]);
     }
   } catch (err) { console.error('Error cron 1h:', err.message); }
