@@ -119,16 +119,19 @@ async function initWhatsApp(){
         const code = lastDisconnect?.error?.output?.statusCode;
         const isConflict = code===440;
         if(isConflict){
-          console.log('[WA] Conflict 440 — otra instancia con misma sesión (ej: tu PC local + Render). Solo Render debe correr Baileys. Esperando 30s antes de reconectar...');
+          console.log('[WA] Conflict 440 — sesión duplicada. Cerrando socket viejo y esperando 60s. Si persiste, borra whatsapp_auth y re-escanea.');
           ready=false;
-          // No limpiar creds, solo esperar — evita loop de 3s
-          setTimeout(initWhatsApp, 30000);
+          try{ await sock.logout(); }catch(e){}
+          try{ sock.end(true); }catch(e){}
+          sock=null;
+          setTimeout(()=>{ initLock=false; initWhatsApp(); }, 60000);
           return;
         }
         const shouldReconnect = code !== DisconnectReason.loggedOut;
         console.log('[WA] Desconectado', lastDisconnect?.error, 'reconnect', shouldReconnect);
         ready=false;
-        if(shouldReconnect) setTimeout(initWhatsApp, 10000);
+        try{ sock=null; }catch(e){}
+        if(shouldReconnect) setTimeout(()=>{ initLock=false; initWhatsApp(); }, 10000);
       }
     });
 
