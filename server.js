@@ -480,22 +480,28 @@ cron.schedule('0 * * * *', async () => {
 });
 
 // ─── WHATSAPP BAILEYS ENDPOINTS ───────────────────────
-app.get('/whatsapp/status', (req,res)=> res.json(baileys ? baileys.getStatus() : {ready:false}));
-app.get('/whatsapp/qr', (req,res)=>{
-  if(!baileys) return res.status(500).send('Baileys no inicializado');
-  const qr=baileys.getQR();
-  if(!qr) return res.json({qr:null, ready: baileys.getStatus().ready});
-  // devolver QR como texto para que el admin lo escanee
-  res.json({qr, ready:false});
-});
-app.get('/whatsapp/qr-image', async (req,res)=>{
-  if(!baileys || !baileys.getQR()) return res.status(404).send('QR no disponible');
-  try{
-    const QR=require('qrcode');
-    const png=await QR.toBuffer(baileys.getQR());
-    res.type('png').send(png);
-  }catch(e){ res.status(500).send(e.message); }
-});
+// Soporta tanto /whatsapp/* como /api/whatsapp/* (frontend usa API_URL=/api)
+for(const p of ['/whatsapp/status','/api/whatsapp/status']){
+  app.get(p, (req,res)=> res.json(baileys ? baileys.getStatus() : {ready:false}));
+}
+for(const p of ['/whatsapp/qr','/api/whatsapp/qr']){
+  app.get(p, (req,res)=>{
+    if(!baileys) return res.status(500).send('Baileys no inicializado');
+    const qr=baileys.getQR();
+    if(!qr) return res.json({qr:null, ready: baileys.getStatus().ready});
+    res.json({qr, ready:false});
+  });
+}
+for(const p of ['/whatsapp/qr-image','/api/whatsapp/qr-image']){
+  app.get(p, async (req,res)=>{
+    if(!baileys || !baileys.getQR()) return res.status(404).send('QR no disponible');
+    try{
+      const QR=require('qrcode');
+      const png=await QR.toBuffer(baileys.getQR());
+      res.type('png').send(png);
+    }catch(e){ res.status(500).send(e.message); }
+  });
+}
 
 // Inicializar Baileys (no bloquea el arranque)
 if(baileys) baileys.initWhatsApp().catch(e=>console.error('[WA] init fail', e.message));
