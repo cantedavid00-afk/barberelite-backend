@@ -71,15 +71,32 @@ function plantillaNuevaCita(negocio, servicio, datos){
     (datos.comentarios ? `📝 <b>Nota:</b> ${datos.comentarios}` : '');
 }
 async function sendWhatsApp(telefono, mensaje){
+  const clean = String(telefono).replace(/\D/g,'');
+  const num = clean.startsWith('52') ? clean : `52${clean}`;
+  // 1) Meta Cloud API si está configurado
   const token = process.env.WHATSAPP_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_ID;
-  if(!token || !phoneId || token==='demo') { console.log(`[WA demo] Para ${telefono}: ${mensaje.slice(0,60)}...`); return false; }
-  try{
-    await axios.post(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
-      messaging_product:'whatsapp', to: telefono.replace(/\D/g,''), type:'text', text:{ body: mensaje }
-    }, { headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json'} });
-    return true;
-  }catch(e){ console.error('WA error', e.response?.data||e.message); return false; }
+  if(token && phoneId && token!=='demo'){
+    try{
+      await axios.post(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+        messaging_product:'whatsapp', to: num, type:'text', text:{ body: mensaje }
+      }, { headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json'} });
+      return true;
+    }catch(e){ console.error('WA Meta error', e.response?.data||e.message); }
+  }
+  // 2) CallMeBot gratis (sin Meta) — requiere CALLMEBOT_APIKEY en Render
+  const cbKey = process.env.CALLMEBOT_APIKEY;
+  if(cbKey && cbKey!=='demo'){
+    try{
+      const url=`https://api.callmebot.com/whatsapp.php?phone=${num}&text=${encodeURIComponent(mensaje)}&apikey=${cbKey}`;
+      const r=await axios.get(url);
+      console.log('[WA CallMeBot]', r.data?.toString().slice(0,120));
+      return true;
+    }catch(e){ console.error('WA CallMeBot error', e.message); }
+  }
+  // 3) Fallback demo (log) — útil en Render Free si no hay API
+  console.log(`[WA demo] Para ${num}: ${mensaje.slice(0,80)}... (configura WHATSAPP_TOKEN o CALLMEBOT_APIKEY en Render para envío real)`);
+  return false;
 }
 
 // ─── HEALTH CHECK (antes del wildcard) ─────────────────────
