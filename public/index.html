@@ -1225,8 +1225,8 @@ async function submitBooking(){
     if(data.whatsappUrl){
       waLink.href = data.whatsappUrl;
       waBox.style.display='block';
-      // Auto-abrir en móviles (opcional, comentado para no ser intrusivo)
-      // window.open(data.whatsappUrl, '_blank');
+      // Auto-abrir WhatsApp (Vercel-safe) tras 800ms
+      setTimeout(()=> window.open(data.whatsappUrl, '_blank'), 800);
     } else waBox.style.display='none';
     document.getElementById('successOv').classList.add('show');
     st.svc=null;st.date=null;st.slot=null;
