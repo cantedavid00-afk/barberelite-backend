@@ -1078,12 +1078,9 @@ function renderCal() {
     const hasA=dayApts.length>0;
     const free=WORK_HOURS.filter(h=>!isSlotBlocked(ds,h)).length;
     const occ = 1 - free/WORK_HOURS.length;
-    let cupo=''; let tip='';
+    let tip='';
     if(!past && !blk){
-      if(free===0) cupo=' ● lleno';
-      else if(occ>=0.7) cupo=' ● casi lleno';
-      else if(occ>=0.4) cupo=' ◐ medio';
-      tip = `${free} de ${WORK_HOURS.length} horas libres${hasA?' · '+dayApts.length+' citas':''}`;
+      tip = hasA ? `${dayApts.length} citas` : 'Disponible';
       if(blk) tip='Bloqueado por admin';
     } else if(blk) tip='Día bloqueado';
     const avail=!past&&!blk&&free>0;
@@ -1096,7 +1093,7 @@ function renderCal() {
     if(hasA&&!past&&!blk) cls+=' has-apts';
     if(!past && !blk && occ>=0.7 && occ<1) cls+=' almost-full';
     const cl=!past&&!blk&&!full;
-    html+=`<div class="${cls}" title="${tip}" ${cl?`onclick="pickDate('${ds}')"`:''}>${d}<span style="font-size:.55rem;display:block;margin-top:-2px;color:var(--muted)">${!past&&!blk?free+' libres':''}</span></div>`;
+    html+=`<div class="${cls}" title="${tip}" ${cl?`onclick="pickDate('${ds}')"`:''}>${d}</div>`;
   }
   document.getElementById('calGrid').innerHTML=html;
 }

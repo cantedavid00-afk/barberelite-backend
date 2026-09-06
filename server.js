@@ -116,16 +116,20 @@ app.get('/api/disponibilidad', async (req, res) => {
     );
     if (bloqueado.rows.length > 0) return res.json({ disponible: false, horas: [] });
 
-    const reservadas = await pool.query(
-      `SELECT hora FROM citas WHERE fecha = $1 AND negocio_id=$2 AND estado != 'cancelada'`, [fecha, negocioId]
+    // Citas del día con duración exacta del servicio
+    const { rows: reservadas } = await pool.query(
+      `SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada'`, [fecha, negocioId]
     );
-    const horasOcupadas = reservadas.rows.map(r => r.hora);
-
+    const toMin = t => { const [h,m]=String(t).split(':').map(Number); return h*60+m; };
     const { rows: horarios } = await pool.query(
-      `SELECT hora FROM horarios_trabajo WHERE dia_semana = $1 AND negocio_id=$2 AND activo = true ORDER BY hora`,
+      `SELECT hora FROM horarios_trabajo WHERE dia_semana=$1 AND negocio_id=$2 AND activo=true ORDER BY hora`,
       [new Date(fecha + 'T12:00:00').getDay(), negocioId]
     );
-    const horas = horarios.map(h => ({ hora: h.hora, disponible: !horasOcupadas.includes(h.hora) }));
+    const horas = horarios.map(h => {
+      const sm = toMin(h.hora);
+      const ocupado = reservadas.some(r => { const s=toMin(r.hora), e=s+(r.duracion||30); return sm>=s && sm<e; });
+      return { hora: h.hora, disponible: !ocupado };
+    });
     res.json({ disponible: true, horas });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -140,16 +144,18 @@ app.post('/api/citas', async (req, res) => {
   }
   try {
     const negocioId = await getNegocioId(req);
-    const ocupado = await pool.query(
-      `SELECT id FROM citas WHERE fecha = $1 AND hora = $2 AND negocio_id=$3 AND estado != 'cancelada'`,
-      [fecha, hora, negocioId]
-    );
-    if (ocupado.rows.length > 0) return res.status(409).json({ error: 'Este horario ya fue reservado. Elige otro.' });
-
     const { rows: [servicio] } = await pool.query(
       'SELECT * FROM servicios WHERE id = $1 AND negocio_id=$2', [servicio_id, negocioId]
     );
     if (!servicio) return res.status(404).json({ error: 'Servicio no encontrado para este negocio' });
+    // Validación solape con duración exacta
+    const toMin = t => { const [h,m]=String(t).split(':').map(Number); return h*60+m; };
+    const ns = toMin(hora), ne = ns + (servicio.duracion||30);
+    const { rows: existentes } = await pool.query(
+      `SELECT c.hora, s.duracion FROM citas c JOIN servicios s ON s.id=c.servicio_id WHERE c.fecha=$1 AND c.negocio_id=$2 AND c.estado!='cancelada'`, [fecha, negocioId]
+    );
+    const solapa = existentes.some(r=>{ const s=toMin(r.hora), e=s+(r.duracion||30); return ns<e && ne>s; });
+    if(solapa) return res.status(409).json({ error: 'Este horario se solapa con otra cita (duración exacta). Elige otro.' });
 
     const { rows: [cita] } = await pool.query(
       `INSERT INTO citas (nombre, telefono, email, servicio_id, fecha, hora, comentarios, estado, negocio_id)
