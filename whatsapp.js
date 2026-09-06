@@ -56,23 +56,30 @@ async function useSupabaseAuthState(){
 
 async function initWhatsApp(){
   try{
-    const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = await import('@whiskeysockets/baileys');
+    const { default: makeWASocket, DisconnectReason, initAuthCreds, BufferJSON } = await import('@whiskeysockets/baileys');
     // Intentar cargar desde Supabase
     const sup = await useSupabaseAuthState();
     let state, saveCreds;
-    if(sup.state.creds){
-      state = sup.state;
-      saveCreds = async ()=>{
-        // guardar creds actualizados
-        const creds = state.creds;
-        await pool.query('INSERT INTO whatsapp_auth (id, data) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data', ['creds', JSON.stringify(creds)]);
-      };
-      console.log('[WA] Creds cargados desde Supabase');
+    // Si no hay creds, generar unos nuevos con initAuthCreds (evita crash creds.me undefined)
+    let creds = sup.state.creds;
+    if(!creds){
+      creds = initAuthCreds();
+      // guardar inicial
+      await pool.query('INSERT INTO whatsapp_auth (id, data) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data', ['creds', JSON.stringify(creds, BufferJSON.replacer)]);
+      sup._map.set('creds', creds);
+      console.log('[WA] Creds nuevos generados');
     } else {
-      // fallback a memoria (primera vez)
-      state = { creds: undefined, keys: sup.state.keys };
-      saveCreds = sup.saveCreds;
+      console.log('[WA] Creds cargados desde Supabase');
+      // Decodificar con BufferJSON si viene como string
+      if(typeof creds === 'string') creds = JSON.parse(creds, BufferJSON.reviver);
+      else creds = JSON.parse(JSON.stringify(creds), BufferJSON.reviver);
     }
+    state = { creds, keys: sup.state.keys };
+    saveCreds = async ()=>{
+      const data = JSON.stringify(state.creds, BufferJSON.replacer);
+      sup._map.set('creds', state.creds);
+      await pool.query('INSERT INTO whatsapp_auth (id, data) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data', ['creds', data]);
+    };
 
     sock = makeWASocket({
       auth: state,
@@ -82,12 +89,8 @@ async function initWhatsApp(){
     });
 
     sock.ev.on('creds.update', async ()=>{
+      // Baileys envía creds actualizados aquí
       await saveCreds();
-      // también guardar keys via sup.state.keys.set ya lo hace
-      // guardar creds en map
-      if(sock.authState?.creds){
-        await pool.query('INSERT INTO whatsapp_auth (id, data) VALUES ($1, $2::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data', ['creds', JSON.stringify(sock.authState.creds)]);
-      }
     });
 
     sock.ev.on('connection.update', async (u)=>{
