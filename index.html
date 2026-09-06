@@ -781,6 +781,7 @@
       <div class="sblink" onclick="aSection('emps',this)"><span class="si">💈</span>Empleados</div>
       <div class="sblink" onclick="aSection('svcs',this)"><span class="si">✂️</span>Servicios</div>
       <div class="sbtitle">Herramientas</div>
+      <div class="sblink" onclick="aSection('wa',this)"><span class="si">💬</span>WhatsApp QR</div>
       <div class="sblink" onclick="aSection('share',this)"><span class="si">🔗</span>Compartir / QR</div>
       <div class="sblink" onclick="aSection('cfg',this)"><span class="si">⚙️</span>Configuración</div>
     </div>
@@ -1333,7 +1334,7 @@ function aSection(sec,el){
   if(el)el.classList.add('active');
   const c=document.getElementById('aContent');
   if (sec === 'week') weekOffset = 0; 
-  const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg,cats:rCats,emps:rEmps,svcs:rSvcs};
+  const map={dash:rDash,week:rWeek,apts:rApts,avail:rAvail,crm:rCRM,stats:rStats,share:rShare,cfg:rCfg,cats:rCats,emps:rEmps,svcs:rSvcs,wa:rWA};
   if(map[sec])map[sec](c);
 }
 function navToAdminSec(secId, filterStr) {
@@ -1848,6 +1849,24 @@ function sendComprobante(id){
   });
 }
 
+async function rWA(c){
+  c.innerHTML='<div class="empty-st">Cargando WhatsApp...</div>';
+  try{
+    const st=await fetch(`${API_URL}/whatsapp/status`).then(r=>r.json());
+    if(st.ready){
+      c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">WhatsApp</div><h2 style="font-size:1.5rem">✅ Conectado</h2><p style="color:var(--muted)">Tu número ya está vinculado. Los recordatorios 1h se envían automático a clientes.</p></div>
+      <div class="acard"><h4>Estado</h4><p style="color:#6dbe6d">● Conectado — Baileys listo</p><button class="bsm" onclick="rWA(document.getElementById('aContent'))">🔄 Verificar</button></div>`;
+    } else {
+      c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">WhatsApp</div><h2 style="font-size:1.5rem">Vincular WhatsApp</h2><p style="color:var(--muted)">Escanea el QR con WhatsApp > Dispositivos vinculados. Se guarda en Supabase y sobrevive a reinicios de Render.</p></div>
+      <div class="acard" style="text-align:center"><h4>📱 QR para vincular</h4>
+        <div style="display:flex;justify-content:center;margin:1rem 0"><img id="waQRImg" src="${API_URL}/whatsapp/qr-image?ts=${Date.now()}" style="border-radius:12px;border:1px solid var(--border);max-width:280px" onerror="this.style.display='none';document.getElementById('waQRErr').style.display='block'"/></div>
+        <p id="waQRErr" style="display:none;color:#e05050">QR aún no disponible, espera 10s y recarga. Revisa Render > Logs si ves [WA] QR generado.</p>
+        <button class="bsm bsm-g" onclick="rWA(document.getElementById('aContent'))">🔄 Recargar QR</button>
+        <p style="font-size:.78rem;color:var(--muted);margin-top:1rem">También en logs: abre Render > Logs buscar "QR generado" o visita <a href="${API_URL}/whatsapp/qr-image" target="_blank" style="color:var(--accent)">/whatsapp/qr-image</a></p>
+      </div>`;
+    }
+  }catch(e){ c.innerHTML=`<div class="empty-st">Error: ${e.message} — verifica que la API esté en https://barberelite-cosmopolitan-api.onrender.com</div>`; }
+}
 function rShare(c){
   const url=window.location.href.split('?')[0];
   c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">Herramientas</div><h2 style="font-size:1.5rem">Compartir tu Sitio</h2></div>
