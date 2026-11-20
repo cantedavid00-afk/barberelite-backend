@@ -31,7 +31,7 @@ for (const w of adminAuth.configWarnings()) console.warn('[auth]', w);
 
 // Las pruebas automatizadas importan la app sin arrancar cron, WhatsApp ni el puerto.
 const SIDE_EFFECTS = process.env.BARBERELITE_DISABLE_SIDE_EFFECTS !== '1';
-const scheduleJob = (...args) => (SIDE_EFFECTS ? scheduleJob(...args) : null);
+const scheduleJob = (...args) => (SIDE_EFFECTS ? cron.schedule(...args) : null);
 
 // ─── DB (Supabase PostgreSQL) ──────────────────────────────
 const pool = new Pool({
