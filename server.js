@@ -17,6 +17,22 @@ const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
 
+// Render/Vercel ponen un proxy delante: sin esto req.ip sería la IP del proxy y el
+// límite de intentos de login bloquearía a todos los usuarios a la vez.
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
+
+// ─── AUTENTICACIÓN DE ADMINISTRADOR ────────────────────────
+// Política deny-by-default: todo /api, /admin y /whatsapp exige sesión de admin salvo
+// las rutas públicas del portal de clientes (ver security/admin-auth.js).
+const adminAuth = require('./security/admin-auth');
+const { toPublicCita, toPublicEmpleado } = require('./security/public-views');
+app.use(adminAuth.adminGuard);
+for (const w of adminAuth.configWarnings()) console.warn('[auth]', w);
+
+// Las pruebas automatizadas importan la app sin arrancar cron, WhatsApp ni el puerto.
+const SIDE_EFFECTS = process.env.BARBERELITE_DISABLE_SIDE_EFFECTS !== '1';
+const scheduleJob = (...args) => (SIDE_EFFECTS ? scheduleJob(...args) : null);
+
 // ─── DB (Supabase PostgreSQL) ──────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -133,7 +149,7 @@ app.delete('/api/categorias/:id', async (req,res)=>{
 
 // ─── EMPLEADOS ───────────────────────────────────────────
 app.get('/api/empleados', async (req,res)=>{
-  try{ const nid=await getNegocioId(req); const {rows}=await pool.query(`SELECT e.*, COALESCE(array_agg(c.nombre) FILTER (WHERE c.id IS NOT NULL), '{}') as categorias, COALESCE(array_agg(c.id) FILTER (WHERE c.id IS NOT NULL), '{}') as categoria_ids FROM empleados e LEFT JOIN empleado_categorias ec ON ec.empleado_id=e.id LEFT JOIN categorias c ON c.id=ec.categoria_id WHERE e.negocio_id=$1 GROUP BY e.id ORDER BY e.nombre`, [nid]); res.json(rows);}catch(e){res.status(500).json({error:e.message});}
+  try{ const nid=await getNegocioId(req); const {rows}=await pool.query(`SELECT e.*, COALESCE(array_agg(c.nombre) FILTER (WHERE c.id IS NOT NULL), '{}') as categorias, COALESCE(array_agg(c.id) FILTER (WHERE c.id IS NOT NULL), '{}') as categoria_ids FROM empleados e LEFT JOIN empleado_categorias ec ON ec.empleado_id=e.id LEFT JOIN categorias c ON c.id=ec.categoria_id WHERE e.negocio_id=$1 GROUP BY e.id ORDER BY e.nombre`, [nid]); res.json(req.isAdmin ? rows : rows.map(toPublicEmpleado));}catch(e){res.status(500).json({error:e.message});}
 });
 app.post('/api/empleados', async (req,res)=>{
   try{ const nid=await getNegocioId(req); const {nombre, telefono, especialidad, foto_url, categoria_ids}=req.body; if(!nombre) return res.status(400).json({error:'Nombre requerido'}); const {rows:[emp]}=await pool.query('INSERT INTO empleados (negocio_id,nombre,telefono,especialidad,foto_url) VALUES ($1,$2,$3,$4,$5) RETURNING *', [nid,nombre,telefono||'',especialidad||'',foto_url||'']); if(categoria_ids && categoria_ids.length){ for(const cid of categoria_ids) await pool.query('INSERT INTO empleado_categorias (empleado_id,categoria_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [emp.id, cid]); // clonar horarios globales
@@ -165,15 +181,10 @@ app.delete('/api/empleados/:id/dias-bloqueados/:fecha', async (req,res)=>{
   try{ await pool.query('DELETE FROM empleado_dias_bloqueados WHERE empleado_id=$1 AND fecha=$2', [req.params.id, req.params.fecha]); res.json({ok:true});}catch(e){res.status(500).json({error:e.message});}
 });
 
-// POST /api/login — Validar contraseña de administrador
-app.post('/api/login', (req, res) => {
-  const { password } = req.body;
-  if (password === process.env.ADMIN_PASS) {
-    res.json({ ok: true });
-  } else {
-    res.status(401).json({ error: 'Contraseña incorrecta' });
-  }
-});
+// POST /api/login — valida la contraseña (hash scrypt o legado) con límite de intentos
+// y emite un token firmado con expiración. POST /api/logout lo revoca.
+app.post('/api/login', adminAuth.loginHandler);
+app.post('/api/logout', adminAuth.logoutHandler);
 
 // ════════════════════════════════════════
 //  ENDPOINTS — SERVICIOS
@@ -321,7 +332,9 @@ app.post('/api/citas', async (req, res) => {
 });
 
 app.get('/api/citas', async (req, res) => {
-  const { fecha, estado, q: search, limit, offset } = req.query;
+  const { fecha, estado, limit, offset } = req.query;
+  // La búsqueda por nombre/teléfono solo para admin: en público serviría para averiguar si alguien tiene cita.
+  const search = req.isAdmin ? req.query.q : undefined;
   try {
     const negocioId = await getNegocioId(req);
     let q = `SELECT c.*, s.nombre AS servicio_nombre, s.precio FROM citas c JOIN servicios s ON c.servicio_id = s.id WHERE c.negocio_id=$1`;
@@ -331,7 +344,9 @@ app.get('/api/citas', async (req, res) => {
     if (search) { vals.push(`%${search}%`); q += ` AND (c.nombre ILIKE $${vals.length} OR c.telefono ILIKE $${vals.length})`; }
     q += ' ORDER BY c.fecha, c.hora';
     if(limit){ vals.push(parseInt(limit)); q+=` LIMIT $${vals.length}`; if(offset){ vals.push(parseInt(offset)); q+=` OFFSET $${vals.length}`; } }
-    const { rows } = await pool.query(q, vals);
+    const { rows: allRows } = await pool.query(q, vals);
+    // Sin sesión de admin solo se expone la ocupación de la agenda (sin datos personales).
+    const rows = req.isAdmin ? allRows : allRows.map(toPublicCita);
     // total para paginación
     if(limit){
       const cnt = await pool.query(`SELECT COUNT(*) FROM citas c WHERE c.negocio_id=$1`, [negocioId]);
@@ -452,7 +467,7 @@ const waTemplatesRecordatorio = [
   (n,s,h) => `¡Hola ${n}! Mañana tienes *${s}* a las ${h}. ¿Nos confirmas? 😊`,
   (n,s,h) => `Recordatorio ${n}: tu *${s}* es hoy ${h}. ¡No faltes! Cosmopolitan te espera.`
 ];
-cron.schedule('*/5 * * * *', async () => {
+scheduleJob('*/5 * * * *', async () => {
   // Recordatorio 1 hora antes a cliente por WhatsApp + Telegram al negocio (pendiente y confirmada)
   try {
     const { rows: citas } = await pool.query(
@@ -478,7 +493,7 @@ cron.schedule('*/5 * * * *', async () => {
   } catch (err) { console.error('Error cron 1h:', err.message); }
 });
 // Recordatorio 24h antes (corre cada hora)
-cron.schedule('0 * * * *', async () => {
+scheduleJob('0 * * * *', async () => {
   try {
     const { rows: citas } = await pool.query(
       `SELECT c.*, s.nombre AS servicio_nombre, c.negocio_id, n.slug FROM citas c
@@ -579,7 +594,7 @@ for(const p of ['/admin/whatsapp/test','/api/admin/whatsapp/test']){
 }
 
 // Inicializar Baileys (no bloquea el arranque)
-if(baileys) baileys.initWhatsApp().catch(e=>console.error('[WA] init fail', e.message));
+if(baileys && SIDE_EFFECTS) baileys.initWhatsApp().catch(e=>console.error('[WA] init fail', e.message));
 
 // ════════════════════════════════════════
 //  CONFIGURACIÓN DEL FRONTEND
@@ -590,4 +605,8 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`✂️  BarberElite API (multi-negocio) corriendo en puerto ${PORT}`));
+if (SIDE_EFFECTS) {
+  app.listen(PORT, () => console.log(`✂️  BarberElite API (multi-negocio) corriendo en puerto ${PORT}`));
+}
+
+module.exports = app;

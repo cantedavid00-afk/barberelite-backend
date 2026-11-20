@@ -856,6 +856,61 @@
 // ══════════════════════════════════════════════════════
 const API_URL = 'https://barberelite-cosmopolitan-api.onrender.com/api';
 
+// ─── Sesión de administrador ───────────────────────────────
+// El token vive solo en memoria (recargar la página cierra la sesión, igual que antes)
+// y se envía como "Authorization: Bearer" únicamente a nuestra API. La API es de otro
+// origen, por eso no se usa cookie de sesión (ver security/admin-auth.js en el backend).
+let ADMIN_TOKEN = null;
+const _nativeFetch = window.fetch.bind(window);
+window.fetch = function(input, init = {}) {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  const isApi = url.startsWith(API_URL);
+  if (ADMIN_TOKEN && isApi) {
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', 'Bearer ' + ADMIN_TOKEN);
+    init = { ...init, headers };
+  }
+  return _nativeFetch(input, init).then(res => {
+    if (res.status === 401 && ADMIN_TOKEN && isApi) onAdminSessionExpired();
+    return res;
+  });
+};
+function onAdminSessionExpired(){
+  ADMIN_TOKEN = null;
+  if (document.getElementById('adminPanel').classList.contains('show')) {
+    exitAdmin();
+    alert('Tu sesión de administrador expiró. Vuelve a iniciar sesión.');
+  }
+}
+// Descargas autenticadas: window.open no puede enviar la cabecera Authorization.
+async function adminDownload(pathAndQuery, filename){
+  try{
+    const res = await fetch(API_URL + pathAndQuery);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }catch(e){ alert('No se pudo descargar: ' + e.message); }
+}
+// El QR de WhatsApp es sensible (permite vincular el número del negocio): se pide con sesión.
+async function loadWaQr(){
+  const img = document.getElementById('waQRImg');
+  const err = document.getElementById('waQRErr');
+  if(!img) return;
+  try{
+    const res = await fetch(`${API_URL}/whatsapp/qr-image?ts=${Date.now()}`);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    img.src = URL.createObjectURL(await res.blob());
+  }catch(e){ img.style.display='none'; if(err) err.style.display='block'; }
+}
+// Nombre/teléfono de las citas los escribe cualquier visitante al reservar: se escapan
+// antes de insertarlos con innerHTML para evitar XSS almacenado en el panel.
+function escHtml(v){
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
 let globalApts = [];
 let globalBlocked = [];
 let weekOffset = 0; 
@@ -986,6 +1041,8 @@ function fmtDateShort(ds) { return new Date(ds+'T12:00:00').toLocaleDateString('
 //  AUTO-COMPLETAR CITAS EN TIEMPO REAL
 // ══════════════════════════════════════
 async function autoCompletePastAppointments() {
+  // Cambiar estados es una acción de administrador: solo se hace con sesión iniciada.
+  if (!ADMIN_TOKEN) return;
   const now = new Date();
   let changed = false;
 
@@ -1301,12 +1358,19 @@ async function doLogin(){
     });
 
     if(response.ok) {
-      // Contraseña correcta
+      // Contraseña correcta: el servidor devuelve un token firmado con expiración
+      const data = await response.json();
+      ADMIN_TOKEN = data.token;
+      document.getElementById('passErr').style.display='none';
       closeMov('loginModal');
       document.getElementById('adminPass').value='';
       document.getElementById('clientPortal').classList.add('hidden');
       document.getElementById('adminPanel').classList.add('show');
       initAdmin();
+    } else if (response.status === 429) {
+      alert('Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo.');
+    } else if (response.status === 503) {
+      alert('El acceso de administrador no está configurado en el servidor.');
     } else {
       // Contraseña incorrecta
       document.getElementById('passErr').style.display='block';
@@ -1316,6 +1380,9 @@ async function doLogin(){
   }
 }
 function exitAdmin(){
+  // Revoca el token en el servidor (si sigue vigente) y lo olvida en el navegador.
+  if (ADMIN_TOKEN) { fetch(`${API_URL}/logout`, { method: 'POST' }).catch(() => {}); }
+  ADMIN_TOKEN = null;
   document.getElementById('adminPanel').classList.remove('show');
   document.getElementById('clientPortal').classList.remove('hidden');
   window.scrollTo(0,0);
@@ -1405,7 +1472,7 @@ function rWeek(c){
       const ds = d.toISOString().split('T')[0];
       const apt = getApts().find(a=>a.date===ds&&a.time===h&&a.status!=='cancelada');
       if(apt){
-        html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${apt.nombre}</div><div class="as">${apt.service}</div></div></div>`;
+        html+=`<div class="wslot" onclick="showAptDetail(${apt.id})"><div class="aptb"><div class="an">${escHtml(apt.nombre)}</div><div class="as">${apt.service}</div></div></div>`;
       }else{
         const past = d < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
         const blkGlobal = getBlocked().includes(ds);
@@ -1434,8 +1501,8 @@ function showAptDetail(id){
   const stLbl={pendiente:'Pendiente',confirmada:'Confirmada',completada:'Completada',cancelada:'Cancelada'};
   document.getElementById('adTitle').textContent='Detalles de la Cita';
   document.getElementById('adBody').innerHTML=`
-    <div class="dr"><span class="dlbl">Cliente</span><span class="dval2">${apt.nombre}</span></div>
-    <div class="dr"><span class="dlbl">Teléfono</span><span class="dval2">${apt.telefono}</span></div>
+    <div class="dr"><span class="dlbl">Cliente</span><span class="dval2">${escHtml(apt.nombre)}</span></div>
+    <div class="dr"><span class="dlbl">Teléfono</span><span class="dval2">${escHtml(apt.telefono)}</span></div>
     <div class="dr"><span class="dlbl">Servicio</span><span class="dval2">${apt.service}</span></div>
     <div class="dr"><span class="dlbl">Fecha</span><span class="dval2">${fmtDate(apt.date)}</span></div>
     <div class="dr"><span class="dlbl">Hora</span><span class="dval2">${apt.time} – ${end}</span></div>
@@ -1553,7 +1620,7 @@ function rAptsTable(apts,acts=false){
       }
       return`<div class="arow">
         <div class="atcol">${a.time}<small>${fmtDateShort(a.date)}</small></div>
-        <div><div class="acname">${a.nombre}</div><div class="acnote">${a.telefono}</div></div>
+        <div><div class="acname">${escHtml(a.nombre)}</div><div class="acnote">${escHtml(a.telefono)}</div></div>
         <div><div class="sbadge">${a.service}</div></div>
         <div><span class="stbadge ${stM[a.status]}">${stL[a.status]}</span></div>
         <div class="actbts">${ab}<button class="abt" onclick="showAptDetail(${a.id})" style="border-color:var(--border);color:var(--muted)">👁</button></div>
@@ -1569,7 +1636,7 @@ function rApts(c){
   <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
     <input id="aptsSearch" placeholder="Buscar nombre/tel..." style="padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream);font-size:.82rem" oninput="aptsSearch=this.value; aptsPage=0; renderAptsPage()"/>
     ${['todas','pendiente','confirmada','completada','cancelada'].map(s=>`<button class="bsm bsm-g" onclick="aptsFilter='${s}';aptsPage=0;renderAptsPage()">${s==='todas'?'Todas':s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
-    <button class="bsm" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">⬇ CSV</button>
+    <button class="bsm" onclick="adminDownload('/export/citas?negocio=barberelite','citas.csv')">⬇ CSV</button>
   </div>
   <div id="aptsContainer"></div>
   <div style="display:flex;gap:.6rem;justify-content:center;margin-top:1rem">
@@ -1723,13 +1790,13 @@ function rCRM(c){
     <div style="display:flex;gap:.6rem">
       <input id="crmSearch" placeholder="Buscar nombre/tel..." style="padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream);font-size:.82rem" oninput="filterCRM(this.value)"/>
       <button class="bsm bsm-g" onclick="exportCRM()">⬇ Export CSV</button>
-      <button class="bsm" style="border:1px solid var(--border)" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">📄 Citas CSV</button>
+      <button class="bsm" style="border:1px solid var(--border)" onclick="adminDownload('/export/citas?negocio=barberelite','citas.csv')">📄 Citas CSV</button>
     </div>
   </div>
   <div id="crmList">${!cls.length?`<div class="empty-st">Sin clientes.</div>`:`<div class="crm-list">
     <div class="crm-hdr"><span>Nombre</span><span>Teléfono</span><span>Visitas</span><span>Gasto</span><span>Última visita</span></div>
-    ${cls.map(cl=>`<div class="crm-row" data-search="${(cl.n+' '+cl.t).toLowerCase()}">
-      <div style="font-weight:600">${cl.n}</div><div style="color:var(--muted)">${cl.t}</div>
+    ${cls.map(cl=>`<div class="crm-row" data-search="${escHtml((cl.n+' '+cl.t).toLowerCase())}">
+      <div style="font-weight:600">${escHtml(cl.n)}</div><div style="color:var(--muted)">${escHtml(cl.t)}</div>
       <div style="color:var(--accent);font-weight:600">${cl.v}</div><div style="color:#6dbe6d">$${cl.sp.toLocaleString()}</div>
       <div style="font-size:.78rem;color:var(--muted)">${cl.last?fmtDateShort(cl.last):'—'}</div>
     </div>`).join('')}
@@ -1863,11 +1930,12 @@ async function rWA(c){
     } else {
       c.innerHTML=`<div style="margin-bottom:1.5rem"><div class="stag">WhatsApp</div><h2 style="font-size:1.5rem">Vincular WhatsApp</h2><p style="color:var(--muted)">Escanea el QR con WhatsApp > Dispositivos vinculados. Se guarda en Supabase y sobrevive a reinicios de Render.</p></div>
       <div class="acard" style="text-align:center"><h4>📱 QR para vincular</h4>
-        <div style="display:flex;justify-content:center;margin:1rem 0"><img id="waQRImg" src="${API_URL}/whatsapp/qr-image?ts=${Date.now()}" style="border-radius:12px;border:1px solid var(--border);max-width:280px" onerror="this.style.display='none';document.getElementById('waQRErr').style.display='block'"/></div>
+        <div style="display:flex;justify-content:center;margin:1rem 0"><img id="waQRImg" alt="QR de WhatsApp" style="border-radius:12px;border:1px solid var(--border);max-width:280px" onerror="this.style.display='none';document.getElementById('waQRErr').style.display='block'"/></div>
         <p id="waQRErr" style="display:none;color:#e05050">QR aún no disponible, espera 10s y recarga. Revisa Render > Logs si ves [WA] QR generado.</p>
         <button class="bsm bsm-g" onclick="rWA(document.getElementById('aContent'))">🔄 Recargar QR</button>
-        <p style="font-size:.78rem;color:var(--muted);margin-top:1rem">También en logs: abre Render > Logs buscar "QR generado" o visita <a href="${API_URL}/whatsapp/qr-image" target="_blank" style="color:var(--accent)">/whatsapp/qr-image</a></p>
+        <p style="font-size:.78rem;color:var(--muted);margin-top:1rem">También en logs: abre Render > Logs y busca "QR generado".</p>
       </div>`;
+      loadWaQr();
     }
   }catch(e){ c.innerHTML=`<div class="empty-st">Error: ${e.message} — verifica que la API esté en https://barberelite-cosmopolitan-api.onrender.com</div>`; }
 }
@@ -1879,7 +1947,7 @@ async function rHelp(c){
     <div class="acard"><h4>⏰ Recordatorios no llegaron</h4><p>Reenvía manualmente los de hoy (solo confirmadas).</p><button class="bsm bsm-g" onclick="resendHoy()">📨 Reenviar recordatorios de hoy</button><div id="resendBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
     <div class="acard"><h4>🔒 Horarios bloqueados por error</h4><p>Restaura horarios 10:00-19:30 Lun-Sáb si se desconfiguró.</p><button class="bsm bsm-r" onclick="resetHorarios()">♻️ Restaurar horarios</button><div id="resetBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
     <div class="acard"><h4>🧪 Prueba WhatsApp instantánea</h4><p>Envía un mensaje de prueba a cualquier número con WhatsApp real (sin esperar al cron 1h).</p><div style="display:flex;gap:.6rem;flex-wrap:wrap"><input id="waTestPhone" placeholder="2411237222" style="flex:1;min-width:120px;padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream)"/><input id="waTestMsg" placeholder="Mensaje prueba" value="Prueba Cosmopolitan ✅" style="flex:2;min-width:180px;padding:.5rem .9rem;border-radius:50px;border:1px solid var(--border);background:var(--bg3);color:var(--cream)"/><button class="bsm bsm-g" onclick="sendWATest()">📨 Enviar prueba</button></div><div id="waTestBox" style="margin-top:.6rem;font-size:.82rem"></div></div>
-    <div class="acard"><h4>📄 Respaldos</h4><p>Descarga citas y clientes para Excel.</p><div style="display:flex;gap:.6rem"><button class="bsm" onclick="window.open(API_URL+'/export/citas?negocio=barberelite','_blank')">⬇ Citas CSV</button><button class="bsm" onclick="exportCRM()">⬇ Clientes CSV</button></div></div>
+    <div class="acard"><h4>📄 Respaldos</h4><p>Descarga citas y clientes para Excel.</p><div style="display:flex;gap:.6rem"><button class="bsm" onclick="adminDownload('/export/citas?negocio=barberelite','citas.csv')">⬇ Citas CSV</button><button class="bsm" onclick="exportCRM()">⬇ Clientes CSV</button></div></div>
     <div class="acard" style="background:rgba(255,255,255,0.02)"><h4>📚 Guía rápida</h4><ul style="font-size:.82rem;color:var(--muted);line-height:1.7;margin-left:1rem">
       <li><b>WhatsApp QR:</b> Admin > WhatsApp QR > escanear cada 30-60 días o si dice Desconectado.</li>
       <li><b>No llegan recordatorios:</b> verifica que la cita esté en <i>Confirmada</i> y usa el botón de arriba.</li>
